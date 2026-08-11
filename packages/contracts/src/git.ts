@@ -182,6 +182,20 @@ export const VcsSwitchRefInput = Schema.Struct({
 });
 export type VcsSwitchRefInput = typeof VcsSwitchRefInput.Type;
 
+export const VcsRenameRefInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  refName: TrimmedNonEmptyStringSchema,
+  newRefName: TrimmedNonEmptyStringSchema,
+});
+export type VcsRenameRefInput = typeof VcsRenameRefInput.Type;
+
+// The rename may land on a deduplicated name (`-1`..`-100` suffix) when the
+// requested one already exists; refName reports the actual result.
+export const VcsRenameRefResult = Schema.Struct({
+  refName: TrimmedNonEmptyStringSchema,
+});
+export type VcsRenameRefResult = typeof VcsRenameRefResult.Type;
+
 export const VcsInitInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   kind: Schema.optional(VcsDriverKind),

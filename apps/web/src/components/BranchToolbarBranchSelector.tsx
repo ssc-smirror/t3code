@@ -5,7 +5,15 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  GitBranchIcon,
+  LoaderIcon,
+  PencilIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  SparklesIcon,
+} from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -25,8 +33,10 @@ import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { shouldLoadNextBranchPageAfterScroll } from "../state/paginatedBranches";
+import { useEnvironmentSettings } from "../hooks/useSettings";
 import { usePaginatedBranches } from "../state/queries";
-import { useProject, useThread } from "../state/entities";
+import { readEnvironmentSupportsBranchNaming, useProject, useThread } from "../state/entities";
+import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -98,6 +108,7 @@ export function BranchToolbarBranchSelector({
   onComposerFocusRequest,
 }: BranchToolbarBranchSelectorProps) {
   const startFromOriginSwitchId = useId();
+  const autoNameBranchSwitchId = useId();
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, "thread session stop");
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -109,6 +120,10 @@ export function BranchToolbarBranchSelector({
   const createRefMutation = useAtomCommand(vcsEnvironment.createRef, {
     reportFailure: false,
   });
+  const renameRefMutation = useAtomCommand(vcsEnvironment.renameRef, {
+    reportFailure: false,
+  });
+  const updateProjectMutation = useAtomCommand(projectEnvironment.update, "project update");
   // ---------------------------------------------------------------------------
   // Thread / project state (pushed down from parent to colocate with mutation)
   // ---------------------------------------------------------------------------
@@ -353,23 +368,6 @@ export function BranchToolbarBranchSelector({
     );
   }, []);
 
-  const handleBranchContextMenu = useCallback(
-    (event: ReactMouseEvent, branchName: string | null) => {
-      if (!branchName) return;
-      const api = readLocalApi();
-      if (!api) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const items: ContextMenuItem<"copy-branch-name">[] = [
-        { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
-      ];
-      void api.contextMenu.show(items, { x: event.clientX, y: event.clientY }).then((action) => {
-        if (action === "copy-branch-name") copyBranchName(branchName);
-      });
-    },
-    [copyBranchName],
-  );
-
   const runBranchAction = (action: () => Promise<void>) => {
     startBranchActionTransition(async () => {
       await action();
@@ -377,6 +375,137 @@ export function BranchToolbarBranchSelector({
       branchStatusQuery.refresh();
     });
   };
+
+  // ---------------------------------------------------------------------------
+  // Branch naming (rename / regenerate / auto-name)
+  // ---------------------------------------------------------------------------
+  const supportsBranchNaming = readEnvironmentSupportsBranchNaming(environmentId);
+  const autoGenerateBranchNamesDefault = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.autoGenerateBranchNames,
+  );
+  const autoGenerateBranchName =
+    activeProject?.autoGenerateBranchName ?? autoGenerateBranchNamesDefault;
+  const isRegeneratingBranch = serverThread?.branchRegeneration != null;
+  const canRenameBranch =
+    supportsBranchNaming &&
+    hasServerThread &&
+    activeThreadBranch !== null &&
+    branchCwd !== null &&
+    resolvedActiveBranch === activeThreadBranch &&
+    resolvedActiveBranchIsRemote !== true &&
+    !isSelectingWorktreeBase;
+  const canRegenerateBranchName =
+    supportsBranchNaming &&
+    hasServerThread &&
+    activeThreadBranch !== null &&
+    activeWorktreePath !== null;
+
+  const [renameDraftBranch, setRenameDraftBranch] = useState<string | null>(null);
+  const renameCommittedRef = useRef(false);
+
+  const startBranchRename = useCallback(() => {
+    // A rename during generation would race the pending request's rename.
+    if (!canRenameBranch || activeThreadBranch === null || isRegeneratingBranch) return;
+    renameCommittedRef.current = false;
+    setIsBranchMenuOpen(false);
+    setRenameDraftBranch(activeThreadBranch);
+  }, [activeThreadBranch, canRenameBranch, isRegeneratingBranch]);
+
+  const commitBranchRename = (rawValue: string) => {
+    const oldName = renameDraftBranch;
+    setRenameDraftBranch(null);
+    const nextName = rawValue.trim();
+    if (!oldName || !branchCwd || !nextName || nextName === oldName) return;
+    runBranchAction(async () => {
+      setOptimisticBranch(nextName);
+      const renameResult = await renameRefMutation({
+        environmentId,
+        input: { cwd: branchCwd, refName: oldName, newRefName: nextName },
+      });
+      if (renameResult._tag === "Success") {
+        const resolvedName = renameResult.value.refName;
+        setOptimisticBranch(resolvedName);
+        if (activeThreadId && hasServerThread && oldName === activeThreadBranch) {
+          void updateThreadMetadata({
+            environmentId,
+            input: {
+              threadId: activeThreadId,
+              branch: resolvedName,
+              expectedBranch: oldName,
+            },
+          });
+          onActiveThreadBranchOverrideChange?.(resolvedName);
+        }
+        if (resolvedName !== nextName) {
+          toastManager.add({
+            type: "success",
+            title: "Branch renamed",
+            description: `"${nextName}" was taken, so the branch is now "${resolvedName}".`,
+          });
+        }
+        return;
+      }
+      setOptimisticBranch(oldName);
+      if (!isAtomCommandInterrupted(renameResult)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to rename branch.",
+            description: toBranchActionErrorMessage(squashAtomCommandFailure(renameResult)),
+          }),
+        );
+      }
+    });
+  };
+
+  const regenerateBranchName = useCallback(() => {
+    if (!activeThreadId || !hasServerThread) return;
+    void updateThreadMetadata({
+      environmentId,
+      input: { threadId: activeThreadId, regenerateBranch: true },
+    });
+  }, [activeThreadId, environmentId, hasServerThread, updateThreadMetadata]);
+
+  const setAutoGenerateBranchName = useCallback(
+    (checked: boolean) => {
+      if (!activeProject) return;
+      void updateProjectMutation({
+        environmentId,
+        input: { projectId: activeProject.id, autoGenerateBranchName: checked },
+      });
+    },
+    [activeProject, environmentId, updateProjectMutation],
+  );
+
+  const handleBranchContextMenu = useCallback(
+    (event: ReactMouseEvent, branchName: string | null) => {
+      if (!branchName) return;
+      const api = readLocalApi();
+      if (!api) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const canRenameThisBranch = canRenameBranch && branchName === activeThreadBranch;
+      const items: ContextMenuItem<"copy-branch-name" | "rename-branch">[] = [
+        { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
+        ...(canRenameThisBranch
+          ? [
+              {
+                id: "rename-branch",
+                label: "Rename branch…",
+                icon: "pencil",
+                disabled: isRegeneratingBranch,
+              } as const,
+            ]
+          : []),
+      ];
+      void api.contextMenu.show(items, { x: event.clientX, y: event.clientY }).then((action) => {
+        if (action === "copy-branch-name") copyBranchName(branchName);
+        if (action === "rename-branch") startBranchRename();
+      });
+    },
+    [activeThreadBranch, canRenameBranch, copyBranchName, isRegeneratingBranch, startBranchRename],
+  );
 
   const selectBranch = (refName: VcsRef) => {
     if (!branchCwd || !activeProjectCwd || isBranchActionPending) return;
@@ -736,28 +865,107 @@ export function BranchToolbarBranchSelector({
             <TooltipPopup side="top">{branchPrTooltip}</TooltipPopup>
           </Tooltip>
         ) : null}
-        {/* Context menu lives on the wrapper: the disabled Button has
-            pointer-events-none, so the trigger itself never sees right-clicks
-            while refs are loading or a branch action is pending. */}
-        <span
-          className="flex min-w-0"
-          onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
-        >
-          <ComboboxTrigger
-            render={<Button variant="ghost" size="xs" />}
-            className="min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80"
-            disabled={isInitialBranchesLoadPending || isBranchActionPending}
-          >
+        {renameDraftBranch !== null ? (
+          <span className="flex min-w-0 items-center gap-1">
             <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+            <input
+              autoFocus
+              aria-label="Branch name"
+              spellCheck={false}
+              className="w-52 min-w-0 rounded-sm bg-transparent px-1 text-xs text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring"
+              defaultValue={renameDraftBranch}
+              onBlur={(event) => {
+                if (renameCommittedRef.current) return;
+                renameCommittedRef.current = true;
+                commitBranchRename(event.currentTarget.value);
+              }}
+              onFocus={(event) => event.currentTarget.select()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  renameCommittedRef.current = true;
+                  commitBranchRename(event.currentTarget.value);
+                } else if (event.key === "Escape") {
+                  renameCommittedRef.current = true;
+                  setRenameDraftBranch(null);
+                }
+              }}
+            />
+          </span>
+        ) : (
+          <>
+            {/* Context menu lives on the wrapper: the disabled Button has
+                pointer-events-none, so the trigger itself never sees right-clicks
+                while refs are loading or a branch action is pending. */}
             <span
-              data-composer-label
-              className="min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+              className="flex min-w-0"
+              onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
             >
-              {triggerLabel}
+              <ComboboxTrigger
+                render={<Button variant="ghost" size="xs" />}
+                className={cn(
+                  "min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80",
+                  // Dimmed but still interactive while a name is generating:
+                  // the shown name is about to be replaced.
+                  isRegeneratingBranch && "opacity-60",
+                )}
+                disabled={isInitialBranchesLoadPending || isBranchActionPending}
+              >
+                <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+                <span
+                  data-composer-label
+                  className="min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+                >
+                  {triggerLabel}
+                </span>
+                <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+              </ComboboxTrigger>
             </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-          </ComboboxTrigger>
-        </span>
+            {canRenameBranch ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label="Rename branch"
+                      className="shrink-0 px-1 text-muted-foreground/70 hover:text-foreground/80 group-data-[compact]/composer-context:hidden"
+                      disabled={isBranchActionPending || isRegeneratingBranch}
+                      onClick={startBranchRename}
+                    />
+                  }
+                >
+                  <PencilIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Rename branch</TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {canRegenerateBranchName ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label="Generate branch name"
+                      className="shrink-0 px-1 text-muted-foreground/70 hover:text-foreground/80 group-data-[compact]/composer-context:hidden"
+                      disabled={isRegeneratingBranch || isBranchActionPending}
+                      onClick={regenerateBranchName}
+                    />
+                  }
+                >
+                  {isRegeneratingBranch ? (
+                    <LoaderIcon className="size-3 animate-spin" />
+                  ) : (
+                    <SparklesIcon className="size-3" />
+                  )}
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  {isRegeneratingBranch ? "Generating branch name…" : "Generate branch name"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+          </>
+        )}
       </div>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
         <div className="shrink-0 px-3 pt-2.5">
@@ -839,6 +1047,34 @@ export function BranchToolbarBranchSelector({
               <TooltipPopup side="top" className="max-w-72 whitespace-normal leading-tight">
                 Creates the worktree from the latest matching branch on origin instead of your local
                 branch.
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+          {supportsBranchNaming && activeProject && effectiveEnvMode === "worktree" ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <label
+                    htmlFor={autoNameBranchSwitchId}
+                    className="flex cursor-pointer items-center justify-between gap-3 border-t border-border/60 px-3 py-2 text-xs"
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5 font-medium text-muted-foreground">
+                      <SparklesIcon aria-hidden="true" className="size-3 shrink-0 opacity-70" />
+                      <span className="truncate">Auto-name branch</span>
+                    </span>
+                    <Switch
+                      id={autoNameBranchSwitchId}
+                      checked={autoGenerateBranchName}
+                      className="[--thumb-size:--spacing(3.5)]"
+                      aria-label="Auto-generate branch names for this project"
+                      onCheckedChange={(checked) => setAutoGenerateBranchName(Boolean(checked))}
+                    />
+                  </label>
+                }
+              />
+              <TooltipPopup side="top" className="max-w-72 whitespace-normal leading-tight">
+                Lets the model rename new worktree branches once it understands the task. Applies to
+                this project; the default lives in the source control settings.
               </TooltipPopup>
             </Tooltip>
           ) : null}

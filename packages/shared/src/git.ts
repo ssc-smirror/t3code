@@ -1,4 +1,5 @@
 import type {
+  BranchNamingConfig,
   VcsRef,
   SourceControlProviderInfo,
   VcsStatusLocalResult,
@@ -6,6 +7,7 @@ import type {
   VcsStatusResult,
   VcsStatusStreamEvent,
 } from "@t3tools/contracts";
+import { CONVENTIONAL_BRANCH_PREFIXES } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
@@ -106,6 +108,69 @@ export function buildTemporaryWorktreeBranchName(
 
 export function isTemporaryWorktreeBranch(refName: string): boolean {
   return TEMP_WORKTREE_BRANCH_PATTERN.test(refName.trim().toLowerCase());
+}
+
+export interface GeneratedBranchNameParts {
+  /** The descriptive slug produced by the branch-naming model. */
+  readonly branch: string;
+  /** The model's conventional-prefix pick; advisory, validated here. */
+  readonly prefix?: string | undefined;
+}
+
+function stripLeadingSegment(value: string, segment: string): string {
+  return value.startsWith(`${segment}/`) ? value.slice(segment.length + 1) : value;
+}
+
+/**
+ * Assemble the final generated worktree branch name from the model output
+ * and the resolved branch-naming config. The model's slug (and prefix pick,
+ * in conventional mode) is advisory: everything is sanitized, off-list
+ * conventional prefixes fall back to "feature", and an empty slug becomes
+ * "update".
+ */
+export function buildGeneratedWorktreeBranchName(
+  generated: GeneratedBranchNameParts,
+  naming: BranchNamingConfig,
+): string {
+  const conventionalPrefixes: readonly string[] = CONVENTIONAL_BRANCH_PREFIXES;
+  // Models occasionally echo a full ref or fold the prefix into the slug;
+  // strip both before sanitizing so prefixes never double up.
+  let slug = generated.branch
+    .trim()
+    .toLowerCase()
+    .replace(/^refs\/heads\//, "")
+    .replace(/['"`]/g, "");
+  slug = stripLeadingSegment(slug, WORKTREE_BRANCH_PREFIX);
+
+  let prefix: string | null;
+  switch (naming.mode) {
+    case "prefix": {
+      prefix = naming.prefix ?? WORKTREE_BRANCH_PREFIX;
+      slug = stripLeadingSegment(slug, prefix);
+      break;
+    }
+    case "conventional": {
+      const modelPrefix = generated.prefix?.trim().toLowerCase() ?? "";
+      const slugFirstSegment = slug.split("/", 1)[0] ?? "";
+      const slugLeadsWithConventional = conventionalPrefixes.includes(slugFirstSegment);
+      if (slugLeadsWithConventional) {
+        slug = slug.slice(slugFirstSegment.length + 1);
+      }
+      prefix = conventionalPrefixes.includes(modelPrefix)
+        ? modelPrefix
+        : slugLeadsWithConventional
+          ? slugFirstSegment
+          : "feature";
+      break;
+    }
+    case "none": {
+      prefix = null;
+      break;
+    }
+  }
+
+  const safeSlug = sanitizeBranchFragment(slug);
+  return prefix === null ? safeSlug : `${prefix}/${safeSlug}`;
 }
 
 /**

@@ -496,6 +496,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             workspaceRoot: event.payload.workspaceRoot,
             defaultModelSelection: event.payload.defaultModelSelection,
             defaultThreadEnvMode: null,
+            branchNaming: null,
+            autoGenerateBranchName: null,
             faviconPath: event.payload.faviconPath ?? null,
             scripts: event.payload.scripts,
             createdAt: event.payload.createdAt,
@@ -522,6 +524,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             ...(event.payload.defaultThreadEnvMode !== undefined
               ? { defaultThreadEnvMode: event.payload.defaultThreadEnvMode }
+              : {}),
+            ...(event.payload.branchNaming !== undefined
+              ? { branchNaming: event.payload.branchNaming }
+              : {}),
+            ...(event.payload.autoGenerateBranchName !== undefined
+              ? { autoGenerateBranchName: event.payload.autoGenerateBranchName }
               : {}),
             ...(event.payload.faviconPath !== undefined
               ? { faviconPath: event.payload.faviconPath }
@@ -623,6 +631,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pinOrderKey: null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
+            branchRegenerationRequestId: null,
+            branchRegenerationStartedAt: null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -643,6 +653,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             archivedAt: event.payload.archivedAt,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
+            branchRegenerationRequestId: null,
+            branchRegenerationStartedAt: null,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -796,6 +808,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { modelSelection: event.payload.modelSelection }
               : {}),
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
+            ...(event.payload.branchRegeneration !== undefined
+              ? {
+                  branchRegenerationRequestId: event.payload.branchRegeneration?.requestId ?? null,
+                  branchRegenerationStartedAt: event.payload.branchRegeneration?.startedAt ?? null,
+                }
+              : {}),
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
               : {}),

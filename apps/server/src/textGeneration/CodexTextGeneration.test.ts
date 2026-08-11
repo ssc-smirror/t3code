@@ -400,6 +400,31 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
+  it.effect("returns the model's conventional prefix pick in conventional mode", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          prefix: " Bugfix ",
+          branch: "handle-empty-cart",
+        }),
+        stdinMustContain:
+          'prefix must be exactly one of: "feature", "bugfix", "hotfix", "release", "chore".',
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateBranchName({
+            cwd: process.cwd(),
+            message: "The cart crashes when it is empty.",
+            conventional: true,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+
+          expect(generated.branch).toBe("handle-empty-cart");
+          expect(generated.prefix).toBe("bugfix");
+        }),
+    ),
+  );
+
   it.effect("generates thread titles and trims them for sidebar use", () =>
     withFakeCodexEnv(
       {

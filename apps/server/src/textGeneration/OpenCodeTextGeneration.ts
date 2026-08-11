@@ -579,6 +579,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       const { prompt, outputSchema } = buildBranchNamePrompt({
         message: input.message,
         attachments: input.attachments,
+        policy: input.policy,
+        conventional: input.conventional === true,
       });
       const generated = yield* runOpenCodeJson({
         operation: "generateBranchName",
@@ -591,6 +593,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
 
       return {
         branch: sanitizeBranchFragment(generated.branch),
+        ...("prefix" in generated && typeof generated.prefix === "string"
+          ? { prefix: generated.prefix.trim().toLowerCase() }
+          : {}),
       };
     });
 

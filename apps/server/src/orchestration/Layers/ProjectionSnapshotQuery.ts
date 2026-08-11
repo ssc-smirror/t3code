@@ -1,4 +1,5 @@
 import {
+  BranchNamingConfig,
   ChatAttachment,
   CheckpointRef,
   IsoDateTime,
@@ -32,6 +33,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
@@ -69,9 +71,21 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
+// SQLite stores booleans as 0/1 integers.
+const BooleanFromSqliteInt = Schema.Number.pipe(
+  Schema.decodeTo(
+    Schema.Boolean,
+    SchemaTransformation.transform<boolean, number>({
+      decode: (value) => value !== 0,
+      encode: (value) => (value ? 1 : 0),
+    }),
+  ),
+);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+    branchNaming: Schema.optional(Schema.NullOr(Schema.fromJsonString(BranchNamingConfig))),
+    autoGenerateBranchName: Schema.optional(Schema.NullOr(BooleanFromSqliteInt)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
@@ -291,6 +305,15 @@ function mapTitleRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbR
     : null;
 }
 
+function mapBranchRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
+  return row.branchRegenerationRequestId != null && row.branchRegenerationStartedAt != null
+    ? {
+        requestId: row.branchRegenerationRequestId,
+        startedAt: row.branchRegenerationStartedAt,
+      }
+    : null;
+}
+
 function mapSessionRow(
   row: Schema.Schema.Type<typeof ProjectionThreadSessionDbRowSchema>,
 ): OrchestrationSession {
@@ -317,6 +340,8 @@ function mapProjectShellRow(
     repositoryIdentity,
     defaultModelSelection: row.defaultModelSelection,
     defaultThreadEnvMode: row.defaultThreadEnvMode,
+    branchNaming: row.branchNaming ?? null,
+    autoGenerateBranchName: row.autoGenerateBranchName ?? null,
     faviconPath: row.faviconPath ?? null,
     scripts: row.scripts,
     createdAt: row.createdAt,
@@ -394,6 +419,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
+          branch_naming AS "branchNaming",
+          auto_generate_branch_name AS "autoGenerateBranchName",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
           created_at AS "createdAt",
@@ -430,6 +457,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
+          branch_regeneration_request_id AS "branchRegenerationRequestId",
+          branch_regeneration_started_at AS "branchRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -466,6 +495,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
+          branch_regeneration_request_id AS "branchRegenerationRequestId",
+          branch_regeneration_started_at AS "branchRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -504,6 +535,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
+          branch_regeneration_request_id AS "branchRegenerationRequestId",
+          branch_regeneration_started_at AS "branchRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -849,6 +882,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
+          branch_naming AS "branchNaming",
+          auto_generate_branch_name AS "autoGenerateBranchName",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
           created_at AS "createdAt",
@@ -873,6 +908,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
+          branch_naming AS "branchNaming",
+          auto_generate_branch_name AS "autoGenerateBranchName",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
           created_at AS "createdAt",
@@ -946,6 +983,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
+          branch_regeneration_request_id AS "branchRegenerationRequestId",
+          branch_regeneration_started_at AS "branchRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -1551,6 +1590,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 repositoryIdentity: repositoryIdentities.get(row.projectId) ?? null,
                 defaultModelSelection: row.defaultModelSelection,
                 defaultThreadEnvMode: row.defaultThreadEnvMode,
+                branchNaming: row.branchNaming ?? null,
+                autoGenerateBranchName: row.autoGenerateBranchName ?? null,
                 faviconPath: row.faviconPath ?? null,
                 scripts: row.scripts,
                 createdAt: row.createdAt,
@@ -1578,6 +1619,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 pinnedAt: row.pinnedAt,
                 pinOrderKey: row.pinOrderKey ?? null,
                 titleRegeneration: mapTitleRegeneration(row),
+                branchRegeneration: mapBranchRegeneration(row),
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1682,6 +1724,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   workspaceRoot: row.workspaceRoot,
                   defaultModelSelection: row.defaultModelSelection,
                   defaultThreadEnvMode: row.defaultThreadEnvMode,
+                  branchNaming: row.branchNaming ?? null,
+                  autoGenerateBranchName: row.autoGenerateBranchName ?? null,
                   faviconPath: row.faviconPath ?? null,
                   scripts: row.scripts,
                   createdAt: row.createdAt,
@@ -1785,6 +1829,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   pinnedAt: row.pinnedAt,
                   pinOrderKey: row.pinOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
+                  branchRegeneration: mapBranchRegeneration(row),
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1921,6 +1966,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       pinnedAt: row.pinnedAt,
                       pinOrderKey: row.pinOrderKey ?? null,
                       titleRegeneration: mapTitleRegeneration(row),
+                      branchRegeneration: mapBranchRegeneration(row),
                       session: sessionByThread.get(row.threadId) ?? null,
                       latestUserMessageAt: row.latestUserMessageAt,
                       hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -2066,6 +2112,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   pinnedAt: row.pinnedAt,
                   pinOrderKey: row.pinOrderKey ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
+                  branchRegeneration: mapBranchRegeneration(row),
                   session: sessionByThread.get(row.threadId) ?? null,
                   latestUserMessageAt: row.latestUserMessageAt,
                   hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -2345,6 +2392,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         pinnedAt: threadRow.value.pinnedAt,
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
+        branchRegeneration: mapBranchRegeneration(threadRow.value),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
@@ -2466,6 +2514,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         pinnedAt: threadRow.value.pinnedAt,
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
+        branchRegeneration: mapBranchRegeneration(threadRow.value),
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {

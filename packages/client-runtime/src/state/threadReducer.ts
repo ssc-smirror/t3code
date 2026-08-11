@@ -113,6 +113,7 @@ export function applyThreadDetailEvent(
           ...thread,
           archivedAt: event.payload.archivedAt,
           titleRegeneration: null,
+          branchRegeneration: null,
           updatedAt: event.payload.updatedAt,
         },
       };
@@ -215,6 +216,9 @@ export function applyThreadDetailEvent(
             ? { modelSelection: event.payload.modelSelection }
             : {}),
           ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
+          ...(event.payload.branchRegeneration !== undefined
+            ? { branchRegeneration: event.payload.branchRegeneration }
+            : {}),
           ...(event.payload.worktreePath !== undefined
             ? { worktreePath: event.payload.worktreePath }
             : {}),

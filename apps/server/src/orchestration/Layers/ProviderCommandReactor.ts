@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationProjectShell,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -12,7 +13,7 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
-import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { buildGeneratedWorktreeBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -38,6 +39,7 @@ import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
+import { T3ProjectFileLoader } from "../../project/T3ProjectFileLoader.ts";
 import { forkParked, ServerActivation } from "../../serverActivation.ts";
 import {
   resolveSourceControlWriterModelSelection,
@@ -287,29 +289,6 @@ function stalePendingRequestDetail(
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
 }
 
-function buildGeneratedWorktreeBranchName(raw: string): string {
-  const normalized = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^refs\/heads\//, "")
-    .replace(/['"`]/g, "");
-
-  const withoutPrefix = normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-    ? normalized.slice(`${WORKTREE_BRANCH_PREFIX}/`.length)
-    : normalized;
-
-  const branchFragment = withoutPrefix
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/-+/g, "-")
-    .replace(/^[./_-]+|[./_-]+$/g, "")
-    .slice(0, 64)
-    .replace(/[./_-]+$/g, "");
-
-  const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
-  return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
-}
-
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -320,6 +299,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const t3ProjectFileLoader = yield* T3ProjectFileLoader;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -792,14 +772,42 @@ const make = Effect.gen(function* () {
     };
   });
 
-  const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fn(
-    "maybeGenerateAndRenameWorktreeBranchForFirstTurn",
+  // Precedence: project setting > checked-in t3.json > global server setting.
+  // The auto-generate flag has no t3.json entry — it is a user preference,
+  // not a repository convention.
+  const resolveBranchNamingForProject = Effect.fnUntraced(function* (
+    project: OrchestrationProjectShell | undefined,
+  ) {
+    const settings = yield* serverSettingsService.getSettings;
+    let naming = project?.branchNaming ?? null;
+    if (naming === null && project !== undefined) {
+      const projectFile = yield* t3ProjectFileLoader.load(project.workspaceRoot);
+      naming = Option.isSome(projectFile) ? (projectFile.value.branchNaming ?? null) : null;
+    }
+    return {
+      naming: naming ?? settings.branchNaming,
+      autoGenerate: project?.autoGenerateBranchName ?? settings.autoGenerateBranchNames,
+    };
+  });
+
+  const resolveBranchNamingModelSelection = Effect.fnUntraced(function* () {
+    const settings = yield* serverSettingsService.getSettings;
+    return settings.sourceControlWriterModelSelection === null
+      ? settings.textGenerationModelSelection
+      : resolveSourceControlWriterModelSelection(settings, yield* providerRegistry.getProviders);
+  });
+
+  // First-turn naming rides the same regeneration flow as the explicit
+  // button: dispatching regenerateBranch sets the pending marker (clients
+  // show a spinner via shell pushes) and the branch-regeneration worker
+  // handles generation, rename, and completion.
+  const maybeRequestWorktreeBranchNameForFirstTurn = Effect.fn(
+    "maybeRequestWorktreeBranchNameForFirstTurn",
   )(function* (input: {
     readonly threadId: ThreadId;
     readonly branch: string | null;
     readonly worktreePath: string | null;
-    readonly messageText: string;
-    readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly project: OrchestrationProjectShell | undefined;
   }) {
     if (!input.branch || !input.worktreePath) {
       return;
@@ -808,45 +816,21 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const oldBranch = input.branch;
-    const cwd = input.worktreePath;
-    const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const settings = yield* serverSettingsService.getSettings;
-      const modelSelection =
-        settings.sourceControlWriterModelSelection === null
-          ? settings.textGenerationModelSelection
-          : resolveSourceControlWriterModelSelection(
-              settings,
-              yield* providerRegistry.getProviders,
-            );
+      const { autoGenerate } = yield* resolveBranchNamingForProject(input.project);
+      if (!autoGenerate) return;
 
-      const generated = yield* textGeneration.generateBranchName({
-        cwd,
-        message: input.messageText,
-        ...(attachments.length > 0 ? { attachments } : {}),
-        modelSelection,
-      });
-      if (!generated) return;
-
-      const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
-      if (targetBranch === oldBranch) return;
-
-      const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
       yield* orchestrationEngine.dispatch({
         type: "thread.meta.update",
-        commandId: yield* serverCommandId("worktree-branch-rename"),
+        commandId: yield* serverCommandId("worktree-branch-name-request"),
         threadId: input.threadId,
-        branch: renamed.branch,
-        worktreePath: cwd,
+        regenerateBranch: true,
       });
-      yield* vcsStatusBroadcaster.refreshStatus(cwd).pipe(Effect.ignoreCause({ log: true }));
     }).pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("provider command reactor failed to generate or rename worktree branch", {
+        Effect.logWarning("provider command reactor failed to request worktree branch name", {
           threadId: input.threadId,
-          cwd,
-          oldBranch,
+          branch: input.branch,
           cause: Cause.pretty(cause),
         }),
       ),
@@ -1068,6 +1052,186 @@ const make = Effect.gen(function* () {
     processThreadTitleRegenerationSafely,
   );
 
+  const regenerateWorktreeBranch = Effect.fn("regenerateWorktreeBranch")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>,
+    requestId: CommandId,
+  ) {
+    if (event.payload.regenerateBranch !== true) {
+      return { _tag: "Superseded" } as const;
+    }
+
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread || thread.branchRegeneration?.requestId !== requestId) {
+      return { _tag: "Superseded" } as const;
+    }
+
+    const oldBranch = event.payload.previousBranch ?? thread.branch;
+    if (oldBranch === null || thread.worktreePath === null) {
+      return { _tag: "Completed", branch: undefined } as const;
+    }
+    if (thread.branch !== oldBranch) {
+      return { _tag: "Superseded" } as const;
+    }
+    const cwd = thread.worktreePath;
+
+    const { message, attachments } = formatThreadTitleContext(thread.messages);
+    if (message.length === 0) {
+      return { _tag: "Completed", branch: undefined } as const;
+    }
+
+    const project = yield* resolveProject(thread.projectId);
+    const { naming } = yield* resolveBranchNamingForProject(project);
+    const modelSelection = yield* resolveBranchNamingModelSelection();
+    const generated = yield* textGeneration.generateBranchName({
+      cwd,
+      message,
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(naming.mode === "conventional" ? { conventional: true } : {}),
+      modelSelection,
+    });
+
+    const targetBranch = buildGeneratedWorktreeBranchName(generated, naming);
+    if (targetBranch === oldBranch) {
+      return { _tag: "Completed", branch: undefined } as const;
+    }
+
+    const latestThread = yield* resolveThread(event.payload.threadId);
+    if (
+      !latestThread ||
+      latestThread.branchRegeneration?.requestId !== requestId ||
+      latestThread.branch !== oldBranch
+    ) {
+      return { _tag: "Superseded" } as const;
+    }
+
+    // A manual rename can still land between this rename and the completion
+    // dispatch; metadata then keeps the manual name and the git branch keeps
+    // the generated one — same accepted race class as title regeneration.
+    const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
+    yield* vcsStatusBroadcaster.refreshStatus(cwd).pipe(Effect.ignoreCause({ log: true }));
+    return { _tag: "Completed", branch: renamed.branch } as const;
+  });
+  const dispatchThreadBranchRegenerationCompletion = Effect.fn(
+    "dispatchThreadBranchRegenerationCompletion",
+  )(function* (input: {
+    readonly threadId: ThreadId;
+    readonly requestId: CommandId;
+    readonly branch?: string;
+  }) {
+    yield* orchestrationEngine.dispatch({
+      type: "thread.branch.regeneration.complete",
+      commandId: yield* serverCommandId("thread-branch-regeneration-complete"),
+      threadId: input.threadId,
+      requestId: input.requestId,
+      ...(input.branch !== undefined ? { branch: input.branch } : {}),
+    });
+  });
+  const findInterruptedThreadBranchRegenerations = Effect.fn(
+    "findInterruptedThreadBranchRegenerations",
+  )(function* () {
+    const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
+    return readModel.threads.flatMap((thread) => {
+      const requestId = thread.branchRegeneration?.requestId;
+      return requestId === undefined ? [] : [{ threadId: thread.id, requestId }];
+    });
+  });
+  const clearInterruptedThreadBranchRegenerations = Effect.fn(
+    "clearInterruptedThreadBranchRegenerations",
+  )(function* (
+    interrupted: ReadonlyArray<{ readonly threadId: ThreadId; readonly requestId: CommandId }>,
+  ) {
+    yield* Effect.forEach(
+      interrupted,
+      ({ threadId, requestId }) => {
+        return dispatchThreadBranchRegenerationCompletion({
+          threadId,
+          requestId,
+        }).pipe(
+          Effect.catchCause((cause) => {
+            if (Cause.hasInterruptsOnly(cause)) {
+              return Effect.interrupt;
+            }
+            return Effect.logWarning(
+              "provider command reactor failed to clear interrupted branch regeneration",
+              {
+                threadId,
+                cause: Cause.pretty(cause),
+              },
+            );
+          }),
+        );
+      },
+      { discard: true },
+    );
+  });
+  const processThreadBranchRegenerationSafely = Effect.fn("processThreadBranchRegenerationSafely")(
+    function* (event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>) {
+      if (event.payload.regenerateBranch !== true) {
+        return;
+      }
+
+      const requestId = event.payload.branchRegeneration?.requestId ?? event.commandId;
+      if (requestId === null) {
+        return;
+      }
+      const result = yield* regenerateWorktreeBranch(event, requestId).pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning(
+            "provider command reactor failed to regenerate worktree branch",
+            {
+              threadId: event.payload.threadId,
+              cause: Cause.pretty(cause),
+            },
+          ).pipe(Effect.as({ _tag: "Completed", branch: undefined } as const));
+        }),
+      );
+      if (result._tag === "Superseded") {
+        return;
+      }
+
+      const completion = {
+        threadId: event.payload.threadId,
+        requestId,
+        ...(result.branch !== undefined ? { branch: result.branch } : {}),
+      };
+      yield* dispatchThreadBranchRegenerationCompletion(completion).pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning(
+            "provider command reactor retrying branch regeneration completion",
+            {
+              threadId: event.payload.threadId,
+              cause: Cause.pretty(cause),
+            },
+          ).pipe(Effect.andThen(dispatchThreadBranchRegenerationCompletion(completion)));
+        }),
+      );
+    },
+    (effect, event) =>
+      effect.pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning(
+            "provider command reactor failed to complete branch regeneration",
+            {
+              threadId: event.payload.threadId,
+              cause: Cause.pretty(cause),
+            },
+          );
+        }),
+      ),
+  );
+  const threadBranchRegenerationWorker = yield* makeDrainableWorker(
+    processThreadBranchRegenerationSafely,
+  );
+
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
@@ -1109,11 +1273,11 @@ const make = Effect.gen(function* () {
         ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
       };
 
-      yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
+      yield* maybeRequestWorktreeBranchNameForFirstTurn({
         threadId: event.payload.threadId,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
-        ...generationInput,
+        project,
       }).pipe(Effect.forkScoped);
 
       if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
@@ -1340,6 +1504,7 @@ const make = Effect.gen(function* () {
     switch (event.type) {
       case "thread.meta-updated":
         yield* threadTitleRegenerationWorker.enqueue(event);
+        yield* threadBranchRegenerationWorker.enqueue(event);
         return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThread(event.payload.threadId);
@@ -1399,9 +1564,21 @@ const make = Effect.gen(function* () {
         ).pipe(Effect.as([]));
       }),
     );
+    const interruptedBranchRegenerations = yield* findInterruptedThreadBranchRegenerations().pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.interrupt;
+        }
+        return Effect.logWarning(
+          "provider command reactor failed to find interrupted branch regenerations",
+          { cause: Cause.pretty(cause) },
+        ).pipe(Effect.as([]));
+      }),
+    );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
-        (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
+        (event.type === "thread.meta-updated" &&
+          (event.payload.regenerateTitle === true || event.payload.regenerateBranch === true)) ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
@@ -1418,15 +1595,19 @@ const make = Effect.gen(function* () {
     // The domain event stream is hot, so work pending before this reactor
     // starts cannot be resumed. Correlated completions only clear the request
     // captured here, leaving any newer request untouched.
-    const clearInterrupted = clearInterruptedThreadTitleRegenerations(
-      interruptedTitleRegenerations,
+    const clearInterrupted = Effect.all(
+      [
+        clearInterruptedThreadTitleRegenerations(interruptedTitleRegenerations),
+        clearInterruptedThreadBranchRegenerations(interruptedBranchRegenerations),
+      ],
+      { discard: true },
     ).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.interrupt;
         }
         return Effect.logWarning(
-          "provider command reactor failed to clear interrupted title regenerations",
+          "provider command reactor failed to clear interrupted regenerations",
           {
             cause: Cause.pretty(cause),
           },
@@ -1446,6 +1627,7 @@ const make = Effect.gen(function* () {
     drain: Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
+      yield* threadBranchRegenerationWorker.drain;
     }),
   } satisfies ProviderCommandReactorShape;
 });

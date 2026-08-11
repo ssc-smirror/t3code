@@ -259,6 +259,16 @@ export function readEnvironmentSupportsTitleRegeneration(environmentId: Environm
   );
 }
 
+/** Whether the environment's server understands branch rename/regeneration
+    (regenerateBranch on thread.meta.update, vcs.renameRef, and the project
+    branchNaming fields). Same version-skew contract as settlement. */
+export function readEnvironmentSupportsBranchNaming(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadBranchNaming === true
+  );
+}
+
 /** Whether the environment's server understands thread.pin.reorder (and
     orderKey on thread.pin). Same version-skew contract as settlement. */
 export function readEnvironmentSupportsPinReorder(environmentId: EnvironmentId): boolean {

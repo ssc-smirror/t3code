@@ -13,6 +13,7 @@ import {
   selectProjectGroupingSettings,
 } from "../../logicalProject";
 import type {
+  BranchNamingConfig,
   ContextMenuItem,
   ModelSelection,
   ProviderDriverKind,
@@ -115,6 +116,19 @@ export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, st
   repository_path: "Group by repository path",
   separate: "Keep separate",
 };
+
+const BRANCH_NAMING_PREFIX_PATTERN = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
+
+function resolveBranchNamingLabel(config: BranchNamingConfig): string {
+  switch (config.mode) {
+    case "prefix":
+      return `Prefix "${config.prefix ?? "t3code"}"`;
+    case "conventional":
+      return "Conventional prefixes";
+    case "none":
+      return "No prefix";
+  }
+}
 
 /** Logical project groups for the settings page, sorted by display name. */
 export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
@@ -365,6 +379,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
         title: string;
         defaultModelSelection: ModelSelection | null;
         defaultThreadEnvMode: ThreadEnvMode | null;
+        branchNaming: BranchNamingConfig | null;
+        autoGenerateBranchName: boolean | null;
         faviconPath: string | null;
       }>,
       failureTitle: string,
@@ -442,6 +458,49 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     [updateAllMembers],
   );
 
+  // ----- branch naming -----
+  const storedBranchNaming = representative.branchNaming ?? null;
+  const storedAutoGenerateBranchName = representative.autoGenerateBranchName ?? null;
+  const setBranchNaming = useCallback(
+    (config: BranchNamingConfig | null) =>
+      void updateAllMembers({ branchNaming: config }, "Failed to update branch naming"),
+    [updateAllMembers],
+  );
+  const setAutoGenerateBranchName = useCallback(
+    (value: boolean | null) =>
+      void updateAllMembers(
+        { autoGenerateBranchName: value },
+        "Failed to update branch auto-naming",
+      ),
+    [updateAllMembers],
+  );
+  const storedBranchPrefix =
+    storedBranchNaming?.mode === "prefix" ? (storedBranchNaming.prefix ?? "") : "";
+  const commitBranchPrefix = useCallback(
+    (rawValue: string) => {
+      if (storedBranchNaming?.mode !== "prefix") return;
+      const trimmed = rawValue.trim().toLowerCase();
+      if (trimmed === storedBranchPrefix) return;
+      if (trimmed.length === 0) {
+        setBranchNaming({ mode: "prefix" });
+        return;
+      }
+      if (!BRANCH_NAMING_PREFIX_PATTERN.test(trimmed)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Invalid branch prefix",
+            description:
+              "Use lowercase letters, digits, dots, dashes, or underscores (no slashes).",
+          }),
+        );
+        return;
+      }
+      setBranchNaming({ mode: "prefix", prefix: trimmed });
+    },
+    [setBranchNaming, storedBranchNaming?.mode, storedBranchPrefix],
+  );
+
   // ----- favicon -----
   const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
@@ -484,6 +543,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   // repo's t3.json value when present, otherwise the global setting.
   const inheritedEnvMode = t3File.file?.defaultThreadEnvMode ?? settings.defaultThreadEnvMode;
   const inheritedEnvModeSource = t3File.file?.defaultThreadEnvMode != null ? "t3.json" : "global";
+  const inheritedBranchNaming = t3File.file?.branchNaming ?? settings.branchNaming;
+  const inheritedBranchNamingSource = t3File.file?.branchNaming != null ? "t3.json" : "global";
   const importableScripts = useMemo(
     () =>
       t3File.scripts.filter(
@@ -905,6 +966,115 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   </SelectItem>
                   <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
                   <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            title="Branch naming"
+            description='How generated worktree branch names are prefixed. "Conventional prefixes" lets the model pick between feature, bugfix, hotfix, release, and chore. Overrides t3.json and the global default.'
+            resetAction={
+              storedBranchNaming !== null ? (
+                <SettingResetButton
+                  label="project branch naming"
+                  onClick={() => setBranchNaming(null)}
+                />
+              ) : null
+            }
+            control={
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                {storedBranchNaming?.mode === "prefix" ? (
+                  <Input
+                    key={storedBranchPrefix}
+                    aria-label="Branch prefix"
+                    className="h-8 w-28"
+                    defaultValue={storedBranchPrefix}
+                    placeholder="t3code"
+                    spellCheck={false}
+                    onBlur={(event) => commitBranchPrefix(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        commitBranchPrefix(event.currentTarget.value);
+                      }
+                    }}
+                  />
+                ) : null}
+                <Select
+                  value={storedBranchNaming?.mode ?? "inherit"}
+                  onValueChange={(value) => {
+                    if (value === "prefix") {
+                      setBranchNaming({ mode: "prefix" });
+                    } else if (value === "conventional" || value === "none") {
+                      setBranchNaming({ mode: value });
+                    } else if (value === "inherit") {
+                      setBranchNaming(null);
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="Branch naming mode">
+                    <SelectValue>
+                      {storedBranchNaming === null
+                        ? `Default (${resolveBranchNamingLabel(inheritedBranchNaming).toLowerCase()})`
+                        : storedBranchNaming.mode === "prefix"
+                          ? "Custom prefix"
+                          : resolveBranchNamingLabel(storedBranchNaming)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    <SelectItem value="inherit">
+                      {`Default (${inheritedBranchNamingSource}: ${resolveBranchNamingLabel(inheritedBranchNaming).toLowerCase()})`}
+                    </SelectItem>
+                    <SelectItem value="prefix">Custom prefix</SelectItem>
+                    <SelectItem value="conventional">Conventional prefixes</SelectItem>
+                    <SelectItem value="none">No prefix</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+            }
+          />
+          <SettingsRow
+            title="Auto-generate branch name"
+            description="Let the model rename a new worktree branch once it understands the task from the first message."
+            resetAction={
+              storedAutoGenerateBranchName !== null ? (
+                <SettingResetButton
+                  label="project branch auto-naming"
+                  onClick={() => setAutoGenerateBranchName(null)}
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={
+                  storedAutoGenerateBranchName === null
+                    ? "inherit"
+                    : storedAutoGenerateBranchName
+                      ? "on"
+                      : "off"
+                }
+                onValueChange={(value) => {
+                  if (value === "on" || value === "off") {
+                    setAutoGenerateBranchName(value === "on");
+                  } else if (value === "inherit") {
+                    setAutoGenerateBranchName(null);
+                  }
+                }}
+              >
+                <SelectTrigger aria-label="Auto-generate branch name">
+                  <SelectValue>
+                    {storedAutoGenerateBranchName === null
+                      ? `Default (${settings.autoGenerateBranchNames ? "on" : "off"})`
+                      : storedAutoGenerateBranchName
+                        ? "On"
+                        : "Off"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="inherit">
+                    {`Default (${settings.autoGenerateBranchNames ? "on" : "off"})`}
+                  </SelectItem>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
                 </SelectPopup>
               </Select>
             }

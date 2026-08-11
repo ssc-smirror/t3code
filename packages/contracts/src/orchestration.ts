@@ -4,6 +4,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Struct from "effect/Struct";
 import { ProviderOptionSelections } from "./model.ts";
+import { BranchNamingConfig } from "./branchNaming.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
   ApprovalRequestId,
@@ -226,6 +227,12 @@ export const OrchestrationProject = Schema.Struct({
   // Per-project override for where new threads start. Null/absent means
   // "no override": clients fall back to t3.json, then the global setting.
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  // Per-project override for generated worktree branch naming. Null/absent
+  // means "no override": fall back to t3.json, then the global setting.
+  branchNaming: Schema.optional(Schema.NullOr(BranchNamingConfig)),
+  // Per-project override for whether the model auto-names the worktree
+  // branch after the first message. Same null/absent = inherit convention.
+  autoGenerateBranchName: Schema.optional(Schema.NullOr(Schema.Boolean)),
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   scripts: Schema.Array(ProjectScript),
@@ -361,6 +368,12 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+export const ThreadBranchRegeneration = Schema.Struct({
+  requestId: CommandId,
+  startedAt: IsoDateTime,
+});
+export type ThreadBranchRegeneration = typeof ThreadBranchRegeneration.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -397,6 +410,7 @@ export const OrchestrationThread = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  branchRegeneration: Schema.optional(Schema.NullOr(ThreadBranchRegeneration)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -423,6 +437,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  branchNaming: Schema.optional(Schema.NullOr(BranchNamingConfig)),
+  autoGenerateBranchName: Schema.optional(Schema.NullOr(Schema.Boolean)),
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   scripts: Schema.Array(ProjectScript),
@@ -455,6 +471,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  branchRegeneration: Schema.optional(Schema.NullOr(ThreadBranchRegeneration)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -639,6 +656,8 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   // Absent = leave unchanged; null = clear the override.
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  branchNaming: Schema.optional(Schema.NullOr(BranchNamingConfig)),
+  autoGenerateBranchName: Schema.optional(Schema.NullOr(Schema.Boolean)),
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
 });
@@ -756,6 +775,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   regenerateTitle: Schema.optional(Schema.Literal(true)),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  regenerateBranch: Schema.optional(Schema.Literal(true)),
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 }).check(
@@ -763,6 +783,11 @@ const ThreadMetaUpdateCommand = Schema.Struct({
     (input) =>
       !(input.title !== undefined && input.regenerateTitle === true) ||
       "title and regenerateTitle cannot be specified together",
+  ),
+  Schema.makeFilter(
+    (input) =>
+      !(input.branch !== undefined && input.regenerateBranch === true) ||
+      "branch and regenerateBranch cannot be specified together",
   ),
 );
 
@@ -1023,6 +1048,16 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+const ThreadBranchRegenerationCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch.regeneration.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: CommandId,
+  // Absent = clear the pending request only (generation failed, was
+  // superseded, or was interrupted by a server restart).
+  branch: Schema.optional(TrimmedNonEmptyString),
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1032,6 +1067,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadBranchRegenerationCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1098,6 +1134,8 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  branchNaming: Schema.optional(Schema.NullOr(BranchNamingConfig)),
+  autoGenerateBranchName: Schema.optional(Schema.NullOr(Schema.Boolean)),
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
@@ -1200,6 +1238,13 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Intent marker consumed by the branch-naming reactor, mirroring
+      regenerateTitle: older clients safely ignore the new field. */
+  regenerateBranch: Schema.optional(Schema.Literal(true)),
+  /** Branch at request time, used to avoid overwriting a later manual rename. */
+  previousBranch: Schema.optional(TrimmedNonEmptyString),
+  /** Pending state shared with clients. Null clears a matching request. */
+  branchRegeneration: Schema.optional(Schema.NullOr(ThreadBranchRegeneration)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   updatedAt: IsoDateTime,
 });

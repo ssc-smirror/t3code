@@ -145,6 +145,8 @@ export interface BranchNamePromptInput {
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   policy?: TextGenerationPolicy | undefined;
+  /** When true, the model also picks a conventional branch prefix. */
+  conventional?: boolean | undefined;
 }
 
 interface PromptFromMessageInput {
@@ -183,24 +185,46 @@ function buildPromptFromMessage(input: PromptFromMessageInput): string {
 }
 
 export function buildBranchNamePrompt(input: BranchNamePromptInput) {
+  const wantsPrefix = input.conventional === true;
   const prompt = buildPromptFromMessage({
     instruction: "You generate concise git branch names.",
-    responseShape: "Return a JSON object with key: branch.",
+    responseShape: wantsPrefix
+      ? "Return a JSON object with keys: prefix, branch."
+      : "Return a JSON object with key: branch.",
     rules: [
       "Branch should describe the requested work from the user message.",
       "Keep it short and specific (2-6 words).",
       "Use plain words only, no issue prefixes and no punctuation-heavy text.",
+      ...(wantsPrefix
+        ? [
+            'prefix must be exactly one of: "feature", "bugfix", "hotfix", "release", "chore".',
+            "Choose bugfix for repairing broken behavior, hotfix for urgent production fixes, release for release preparation, chore for maintenance/tooling/dependency work, and feature otherwise.",
+            "branch must not repeat the prefix.",
+          ]
+        : []),
       "If images are attached, use them as primary context for visual/UI issues.",
     ],
     message: input.message,
     attachments: input.attachments,
     additionalInstructions: input.policy?.branchInstructions,
   });
-  const outputSchema = Schema.Struct({
-    branch: Schema.String,
-  });
 
-  return { prompt, outputSchema };
+  if (wantsPrefix) {
+    return {
+      prompt,
+      outputSchema: Schema.Struct({
+        prefix: Schema.String,
+        branch: Schema.String,
+      }),
+    };
+  }
+
+  return {
+    prompt,
+    outputSchema: Schema.Struct({
+      branch: Schema.String,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------

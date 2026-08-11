@@ -63,6 +63,11 @@ export function mergeEnvironmentThread(
     snoozedAt: shell.snoozedAt,
     pinnedAt: shell.pinnedAt,
     pinOrderKey: shell.pinOrderKey,
+    // Pending regeneration state rides shell pushes: the thread detail
+    // subscription does not forward thread.meta-updated events, so the
+    // detail's copy of these fields goes stale the moment a request starts.
+    titleRegeneration: shell.titleRegeneration,
+    branchRegeneration: shell.branchRegeneration,
     session: shell.session,
   };
 }

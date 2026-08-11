@@ -62,6 +62,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import * as T3ProjectFileLoader from "../../project/T3ProjectFileLoader.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
@@ -412,6 +413,7 @@ describe("ProviderCommandReactor", () => {
           generateThreadTitle,
         }),
       ),
+      Layer.provideMerge(T3ProjectFileLoader.layer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
@@ -1504,8 +1506,10 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.generateBranchName.mock.calls.length === 1);
     await waitFor(() => harness.refreshStatus.mock.calls.length === 1);
+    // First-turn naming rides the regeneration worker, which formats the
+    // thread history as role-prefixed sections.
     expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
-      message: "Add a safer reconnect backoff.",
+      message: "USER:\nAdd a safer reconnect backoff.",
     });
     expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe("/tmp/provider-project-worktree");
   });

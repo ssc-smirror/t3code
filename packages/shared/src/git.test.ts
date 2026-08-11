@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyGitStatusStreamEvent,
+  buildGeneratedWorktreeBranchName,
   buildTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
@@ -98,6 +99,103 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/feature/demo`)).toBe(false);
     expect(isTemporaryWorktreeBranch("main")).toBe(false);
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/deadbeef-extra`)).toBe(false);
+  });
+});
+
+describe("buildGeneratedWorktreeBranchName", () => {
+  it("prefixes with the default worktree prefix in prefix mode", () => {
+    expect(
+      buildGeneratedWorktreeBranchName({ branch: "Fix Login Crash" }, { mode: "prefix" }),
+    ).toBe("t3code/fix-login-crash");
+  });
+
+  it("uses a custom prefix and strips a duplicated prefix from the slug", () => {
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "acme/fix-login-crash" },
+        { mode: "prefix", prefix: "acme" },
+      ),
+    ).toBe("acme/fix-login-crash");
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "t3code/fix-login-crash" },
+        { mode: "prefix", prefix: "acme" },
+      ),
+    ).toBe("acme/fix-login-crash");
+  });
+
+  it("strips refs/heads/ and quotes before assembling", () => {
+    expect(
+      buildGeneratedWorktreeBranchName({ branch: 'refs/heads/"fix-thing"' }, { mode: "prefix" }),
+    ).toBe("t3code/fix-thing");
+  });
+
+  it("keeps a valid conventional prefix picked by the model", () => {
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "handle-empty-cart", prefix: "bugfix" },
+        { mode: "conventional" },
+      ),
+    ).toBe("bugfix/handle-empty-cart");
+  });
+
+  it("falls back to a conventional prefix embedded in the slug", () => {
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "chore/bump-deps", prefix: "housekeeping" },
+        { mode: "conventional" },
+      ),
+    ).toBe("chore/bump-deps");
+  });
+
+  it("falls back to feature for off-list conventional prefixes", () => {
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "add-dark-mode", prefix: "feat" },
+        { mode: "conventional" },
+      ),
+    ).toBe("feature/add-dark-mode");
+    expect(
+      buildGeneratedWorktreeBranchName({ branch: "add-dark-mode" }, { mode: "conventional" }),
+    ).toBe("feature/add-dark-mode");
+  });
+
+  it("does not repeat the prefix when the model echoes it in the slug", () => {
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "bugfix/handle-empty-cart", prefix: "bugfix" },
+        { mode: "conventional" },
+      ),
+    ).toBe("bugfix/handle-empty-cart");
+  });
+
+  it("produces a bare slug in none mode", () => {
+    expect(buildGeneratedWorktreeBranchName({ branch: "Fix Login Crash" }, { mode: "none" })).toBe(
+      "fix-login-crash",
+    );
+    expect(
+      buildGeneratedWorktreeBranchName({ branch: "t3code/fix-login-crash" }, { mode: "none" }),
+    ).toBe("fix-login-crash");
+  });
+
+  it("falls back to update for empty slugs", () => {
+    expect(buildGeneratedWorktreeBranchName({ branch: "  " }, { mode: "prefix" })).toBe(
+      "t3code/update",
+    );
+    expect(
+      buildGeneratedWorktreeBranchName(
+        { branch: "bugfix", prefix: "bugfix" },
+        { mode: "conventional" },
+      ),
+    ).toBe("bugfix/update");
+  });
+
+  it("truncates overlong slugs to 64 characters", () => {
+    const generated = buildGeneratedWorktreeBranchName(
+      { branch: "x".repeat(200) },
+      { mode: "prefix" },
+    );
+    expect(generated).toBe(`t3code/${"x".repeat(64)}`);
   });
 });
 

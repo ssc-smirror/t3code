@@ -363,6 +363,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       const { prompt, outputSchema } = buildBranchNamePrompt({
         message: input.message,
         attachments: input.attachments,
+        policy: input.policy,
+        conventional: input.conventional === true,
       });
 
       const generated = yield* runCodexJson({
@@ -376,6 +378,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
       return {
         branch: sanitizeBranchFragment(generated.branch),
+        ...("prefix" in generated && typeof generated.prefix === "string"
+          ? { prefix: generated.prefix.trim().toLowerCase() }
+          : {}),
       };
     });
 

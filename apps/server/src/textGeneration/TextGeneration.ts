@@ -51,12 +51,18 @@ export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  policy?: TextGenerationPolicy | undefined;
+  /** When true, the model also picks a conventional branch prefix. */
+  conventional?: boolean | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
 }
 
 export interface BranchNameGenerationResult {
   branch: string;
+  /** Only present when `conventional` was set on the input. Advisory: callers
+      validate against the allowed prefix set before use. */
+  prefix?: string | undefined;
 }
 
 export interface ThreadTitleGenerationInput {

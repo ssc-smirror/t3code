@@ -1,5 +1,6 @@
 import {
   CheckpointRef,
+  CommandId,
   EventId,
   MessageId,
   ProjectId,
@@ -286,6 +287,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           defaultThreadEnvMode: null,
+          branchNaming: null,
+          autoGenerateBranchName: null,
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
           deletedAt: null,
@@ -326,6 +329,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           titleRegeneration: null,
+          branchRegeneration: null,
           deletedAt: null,
           messages: [
             {
@@ -406,6 +410,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           defaultThreadEnvMode: null,
+          branchNaming: null,
+          autoGenerateBranchName: null,
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
         },
@@ -445,6 +451,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           titleRegeneration: null,
+          branchRegeneration: null,
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",
@@ -1287,6 +1294,83 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.equal(threadDetail.value.latestTurn?.turnId, asTurnId("turn-running"));
         assert.equal(threadDetail.value.latestTurn?.state, "running");
         assert.equal(threadDetail.value.latestTurn?.startedAt, "2026-04-02T00:00:30.000Z");
+      }
+    }),
+  );
+
+  // Regression: live shell pushes are built from getThreadShellById, so a
+  // pending branch regeneration must surface there (and on the detail read)
+  // for clients to show generation progress.
+  it.effect("surfaces pending branch regeneration on shell and detail reads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          branch_regeneration_request_id,
+          branch_regeneration_started_at,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-branch-regen',
+          'project-1',
+          'Thread',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          't3code/deadbeef',
+          '/tmp/worktree',
+          NULL,
+          NULL,
+          0,
+          0,
+          0,
+          'cmd-branch-regen-request',
+          '2026-04-07T00:00:00.000Z',
+          '2026-04-07T00:00:01.000Z',
+          '2026-04-07T00:00:02.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      const expectedRegeneration = {
+        requestId: CommandId.make("cmd-branch-regen-request"),
+        startedAt: "2026-04-07T00:00:00.000Z",
+      };
+
+      const threadShell = yield* snapshotQuery.getThreadShellById(
+        ThreadId.make("thread-branch-regen"),
+      );
+      assert.equal(threadShell._tag, "Some");
+      if (threadShell._tag === "Some") {
+        assert.deepEqual(threadShell.value.branchRegeneration, expectedRegeneration);
+      }
+
+      const threadDetail = yield* snapshotQuery.getThreadDetailById(
+        ThreadId.make("thread-branch-regen"),
+      );
+      assert.equal(threadDetail._tag, "Some");
+      if (threadDetail._tag === "Some") {
+        assert.deepEqual(threadDetail.value.branchRegeneration, expectedRegeneration);
       }
     }),
   );

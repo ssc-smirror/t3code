@@ -291,6 +291,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.defaultThreadEnvMode !== undefined
             ? { defaultThreadEnvMode: command.defaultThreadEnvMode }
             : {}),
+          ...(command.branchNaming !== undefined ? { branchNaming: command.branchNaming } : {}),
+          ...(command.autoGenerateBranchName !== undefined
+            ? { autoGenerateBranchName: command.autoGenerateBranchName }
+            : {}),
           ...(command.faviconPath !== undefined ? { faviconPath: command.faviconPath } : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           updatedAt: occurredAt,
@@ -834,8 +838,46 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { modelSelection: command.modelSelection }
             : {}),
           ...(branch !== undefined ? { branch } : {}),
+          ...(command.regenerateBranch === true
+            ? {
+                regenerateBranch: true as const,
+                ...(thread.branch !== null ? { previousBranch: thread.branch } : {}),
+                branchRegeneration: {
+                  requestId: command.commandId,
+                  startedAt: occurredAt,
+                },
+              }
+            : {}),
+          ...(branch !== undefined && thread.branchRegeneration != null
+            ? { branchRegeneration: null }
+            : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.branch.regeneration.complete": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const requestIsCurrent = thread.branchRegeneration?.requestId === command.requestId;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          ...(requestIsCurrent && command.branch !== undefined ? { branch: command.branch } : {}),
+          ...(requestIsCurrent ? { branchRegeneration: null } : {}),
+          updatedAt: requestIsCurrent ? occurredAt : thread.updatedAt,
         },
       };
     }

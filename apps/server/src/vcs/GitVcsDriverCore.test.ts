@@ -1323,6 +1323,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(result.branch, current);
       }),
     );
+
+    it.effect("dedupes colliding rename targets and keeps branch config", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const initialBranch = yield* git(cwd, ["branch", "--show-current"]);
+
+        yield* driver.createRef({ cwd, refName: "feature/taken" });
+        yield* driver.createRef({ cwd, refName: "feature/original" });
+        yield* git(cwd, ["config", "branch.feature/original.gh-merge-base", initialBranch]);
+
+        const renamed = yield* driver.renameBranch({
+          cwd,
+          oldBranch: "feature/original",
+          newBranch: "feature/taken",
+        });
+
+        assert.equal(renamed.branch, "feature/taken-1");
+        // `git branch -m` migrates the branch config section, so keys like
+        // gh-merge-base follow the branch to its deduped name.
+        assert.equal(
+          yield* driver.readConfigValue(cwd, `branch.${renamed.branch}.gh-merge-base`),
+          initialBranch,
+        );
+      }),
+    );
   });
 
   describe("worktree operations", () => {

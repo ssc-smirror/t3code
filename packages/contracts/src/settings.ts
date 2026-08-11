@@ -3,6 +3,7 @@ import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import { BranchNamingConfig, DEFAULT_BRANCH_NAMING } from "./branchNaming.ts";
 import { ThreadEnvMode } from "./environment.ts";
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -588,6 +589,12 @@ export const ServerSettings = Schema.Struct({
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Global default for generated worktree branch naming; projects override
+  // via their own setting or a checked-in t3.json.
+  branchNaming: BranchNamingConfig.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BRANCH_NAMING)),
+  ),
+  autoGenerateBranchNames: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -731,6 +738,8 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  branchNaming: Schema.optionalKey(BranchNamingConfig),
+  autoGenerateBranchNames: Schema.optionalKey(Schema.Boolean),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
