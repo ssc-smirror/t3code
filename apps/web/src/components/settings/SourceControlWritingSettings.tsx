@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRef } from "react";
+import { BRANCH_NAMING_PREFIX_PATTERN } from "@t3tools/contracts";
 import type { BranchNamingConfig, SourceControlWritingStyleMode } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -15,6 +16,8 @@ import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
+import { readEnvironmentSupportsBranchNaming } from "../../state/entities";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { primaryServerProvidersAtom } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Input } from "../ui/input";
@@ -42,8 +45,6 @@ const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; descr
     },
   };
 
-const BRANCH_NAMING_PREFIX_PATTERN = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
-
 const BRANCH_NAMING_MODE_OPTIONS: Record<
   BranchNamingConfig["mode"],
   { label: string; description: string }
@@ -66,6 +67,11 @@ const BRANCH_NAMING_MODE_OPTIONS: Record<
 export function SourceControlWritingSettingsSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
+  // Old servers silently drop the branch-naming settings; hide the controls
+  // instead of offering successful-looking no-ops.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const supportsBranchNaming =
+    primaryEnvironmentId !== null && readEnvironmentSupportsBranchNaming(primaryEnvironmentId);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const customInstructionsRef = useRef<HTMLTextAreaElement>(null);
   const style = settings.sourceControlWritingStyle;
@@ -217,87 +223,92 @@ export function SourceControlWritingSettingsSection() {
         }
       />
 
-      <SettingsRow
-        title="Branch naming"
-        description={BRANCH_NAMING_MODE_OPTIONS[branchNaming.mode].description}
-        resetAction={
-          isBranchNamingDirty ? (
-            <SettingResetButton
-              label="branch naming"
-              onClick={() => updateSettings({ branchNaming: branchNamingDefaults })}
-            />
-          ) : null
-        }
-        control={
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            {branchNaming.mode === "prefix" ? (
-              <Input
-                key={storedBranchPrefix}
-                aria-label="Branch prefix"
-                className="h-8 w-28"
-                defaultValue={storedBranchPrefix}
-                placeholder="t3code"
-                spellCheck={false}
-                onBlur={(event) => commitBranchPrefix(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    commitBranchPrefix(event.currentTarget.value);
-                  }
-                }}
-              />
-            ) : null}
-            <Select
-              value={branchNaming.mode}
-              onValueChange={(value) => {
-                if (value === "prefix") {
-                  updateSettings({ branchNaming: { mode: "prefix" } });
-                } else if (value === "conventional" || value === "none") {
-                  updateSettings({ branchNaming: { mode: value } });
-                }
-              }}
-            >
-              <SelectTrigger aria-label="Branch naming mode">
-                <SelectValue>{BRANCH_NAMING_MODE_OPTIONS[branchNaming.mode].label}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {(Object.keys(BRANCH_NAMING_MODE_OPTIONS) as BranchNamingConfig["mode"][]).map(
-                  (mode) => (
-                    <SelectItem key={mode} hideIndicator value={mode}>
-                      {BRANCH_NAMING_MODE_OPTIONS[mode].label}
-                    </SelectItem>
-                  ),
-                )}
-              </SelectPopup>
-            </Select>
-          </div>
-        }
-      />
-
-      <SettingsRow
-        title="Auto-generate branch names"
-        description="Let the model rename new worktree branches once it understands the task. Projects can override this."
-        resetAction={
-          settings.autoGenerateBranchNames !== DEFAULT_UNIFIED_SETTINGS.autoGenerateBranchNames ? (
-            <SettingResetButton
-              label="branch auto-naming"
-              onClick={() =>
-                updateSettings({
-                  autoGenerateBranchNames: DEFAULT_UNIFIED_SETTINGS.autoGenerateBranchNames,
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <Switch
-            checked={settings.autoGenerateBranchNames}
-            onCheckedChange={(checked) =>
-              updateSettings({ autoGenerateBranchNames: Boolean(checked) })
+      {supportsBranchNaming ? (
+        <>
+          <SettingsRow
+            title="Branch naming"
+            description={BRANCH_NAMING_MODE_OPTIONS[branchNaming.mode].description}
+            resetAction={
+              isBranchNamingDirty ? (
+                <SettingResetButton
+                  label="branch naming"
+                  onClick={() => updateSettings({ branchNaming: branchNamingDefaults })}
+                />
+              ) : null
             }
-            aria-label="Auto-generate branch names"
+            control={
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                {branchNaming.mode === "prefix" ? (
+                  <Input
+                    key={storedBranchPrefix}
+                    aria-label="Branch prefix"
+                    className="h-8 w-28"
+                    defaultValue={storedBranchPrefix}
+                    placeholder="t3code"
+                    spellCheck={false}
+                    onBlur={(event) => commitBranchPrefix(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        commitBranchPrefix(event.currentTarget.value);
+                      }
+                    }}
+                  />
+                ) : null}
+                <Select
+                  value={branchNaming.mode}
+                  onValueChange={(value) => {
+                    if (value === "prefix") {
+                      updateSettings({ branchNaming: { mode: "prefix" } });
+                    } else if (value === "conventional" || value === "none") {
+                      updateSettings({ branchNaming: { mode: value } });
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="Branch naming mode">
+                    <SelectValue>{BRANCH_NAMING_MODE_OPTIONS[branchNaming.mode].label}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {(Object.keys(BRANCH_NAMING_MODE_OPTIONS) as BranchNamingConfig["mode"][]).map(
+                      (mode) => (
+                        <SelectItem key={mode} hideIndicator value={mode}>
+                          {BRANCH_NAMING_MODE_OPTIONS[mode].label}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectPopup>
+                </Select>
+              </div>
+            }
           />
-        }
-      />
+
+          <SettingsRow
+            title="Auto-generate branch names"
+            description="Let the model rename new worktree branches once it understands the task. Projects can override this."
+            resetAction={
+              settings.autoGenerateBranchNames !==
+              DEFAULT_UNIFIED_SETTINGS.autoGenerateBranchNames ? (
+                <SettingResetButton
+                  label="branch auto-naming"
+                  onClick={() =>
+                    updateSettings({
+                      autoGenerateBranchNames: DEFAULT_UNIFIED_SETTINGS.autoGenerateBranchNames,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.autoGenerateBranchNames}
+                onCheckedChange={(checked) =>
+                  updateSettings({ autoGenerateBranchNames: Boolean(checked) })
+                }
+                aria-label="Auto-generate branch names"
+              />
+            }
+          />
+        </>
+      ) : null}
 
       <SettingsRow
         title="Source control writer model"

@@ -3,11 +3,11 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Struct from "effect/Struct";
 
 import { BranchNamingConfig, ModelSelection, ProjectScript } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
+import { BooleanFromSqliteInt } from "../SqliteSchemas.ts";
 import {
   DeleteProjectionProjectInput,
   GetProjectionProjectInput,
@@ -15,17 +15,6 @@ import {
   ProjectionProjectRepository,
   type ProjectionProjectRepositoryShape,
 } from "../Services/ProjectionProjects.ts";
-
-// SQLite stores booleans as 0/1 integers.
-const BooleanFromSqliteInt = Schema.Number.pipe(
-  Schema.decodeTo(
-    Schema.Boolean,
-    SchemaTransformation.transform<boolean, number>({
-      decode: (value) => value !== 0,
-      encode: (value) => (value ? 1 : 0),
-    }),
-  ),
-);
 
 const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({

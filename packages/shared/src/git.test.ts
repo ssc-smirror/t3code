@@ -178,6 +178,15 @@ describe("buildGeneratedWorktreeBranchName", () => {
     ).toBe("fix-login-crash");
   });
 
+  it("flattens namespaced model output in none mode", () => {
+    expect(
+      buildGeneratedWorktreeBranchName({ branch: "feature/fix-login" }, { mode: "none" }),
+    ).toBe("feature-fix-login");
+    expect(buildGeneratedWorktreeBranchName({ branch: "team/nested/slug" }, { mode: "none" })).toBe(
+      "team-nested-slug",
+    );
+  });
+
   it("falls back to update for empty slugs", () => {
     expect(buildGeneratedWorktreeBranchName({ branch: "  " }, { mode: "prefix" })).toBe(
       "t3code/update",

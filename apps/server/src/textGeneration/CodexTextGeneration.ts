@@ -378,8 +378,10 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
       return {
         branch: sanitizeBranchFragment(generated.branch),
+        // Advisory passthrough: prefix normalization and validation live in
+        // buildGeneratedWorktreeBranchName, not in each adapter.
         ...("prefix" in generated && typeof generated.prefix === "string"
-          ? { prefix: generated.prefix.trim().toLowerCase() }
+          ? { prefix: generated.prefix }
           : {}),
       };
     });

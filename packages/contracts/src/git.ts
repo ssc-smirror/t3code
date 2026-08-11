@@ -186,6 +186,10 @@ export const VcsRenameRefInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
   newRefName: TrimmedNonEmptyStringSchema,
+  // When set, the server updates this thread's stored branch in the same
+  // operation (guarded by refName as the expected branch), so a rename can
+  // never leave git and thread metadata pointing at different names.
+  threadId: Schema.optional(ThreadId),
 });
 export type VcsRenameRefInput = typeof VcsRenameRefInput.Type;
 

@@ -8,7 +8,6 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
   ChevronDownIcon,
   GitBranchIcon,
-  LoaderIcon,
   PencilIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -417,24 +416,28 @@ export function BranchToolbarBranchSelector({
     setRenameDraftBranch(null);
     const nextName = rawValue.trim();
     if (!oldName || !branchCwd || !nextName || nextName === oldName) return;
+    // The thread's stored branch is updated server-side within the rename
+    // operation itself (threadId below), so a disconnect can never leave git
+    // and thread metadata disagreeing.
+    const renameThreadId =
+      hasServerThread && activeThreadId && oldName === activeThreadBranch
+        ? activeThreadId
+        : undefined;
     runBranchAction(async () => {
       setOptimisticBranch(nextName);
       const renameResult = await renameRefMutation({
         environmentId,
-        input: { cwd: branchCwd, refName: oldName, newRefName: nextName },
+        input: {
+          cwd: branchCwd,
+          refName: oldName,
+          newRefName: nextName,
+          ...(renameThreadId !== undefined ? { threadId: renameThreadId } : {}),
+        },
       });
       if (renameResult._tag === "Success") {
         const resolvedName = renameResult.value.refName;
         setOptimisticBranch(resolvedName);
-        if (activeThreadId && hasServerThread && oldName === activeThreadBranch) {
-          void updateThreadMetadata({
-            environmentId,
-            input: {
-              threadId: activeThreadId,
-              branch: resolvedName,
-              expectedBranch: oldName,
-            },
-          });
+        if (renameThreadId !== undefined) {
           onActiveThreadBranchOverrideChange?.(resolvedName);
         }
         if (resolvedName !== nextName) {
@@ -953,11 +956,10 @@ export function BranchToolbarBranchSelector({
                     />
                   }
                 >
-                  {isRegeneratingBranch ? (
-                    <LoaderIcon className="size-3 animate-spin" />
-                  ) : (
-                    <SparklesIcon className="size-3" />
-                  )}
+                  {/* Static pending treatment: continuously repainting
+                      animations are banned (they peg the GPU), so pending
+                      reads as a dimmed icon plus the dimmed trigger label. */}
+                  <SparklesIcon className={cn("size-3", isRegeneratingBranch && "opacity-40")} />
                 </TooltipTrigger>
                 <TooltipPopup side="top">
                   {isRegeneratingBranch ? "Generating branch name…" : "Generate branch name"}

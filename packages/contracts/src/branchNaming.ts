@@ -16,13 +16,19 @@ export const ConventionalBranchPrefix = Schema.Literals([...CONVENTIONAL_BRANCH_
 export type ConventionalBranchPrefix = typeof ConventionalBranchPrefix.Type;
 
 /**
- * A custom branch prefix: exactly one lowercase git path segment. The "/"
- * separating prefix from slug is added at name-assembly time, never stored.
+ * A custom branch prefix: exactly one lowercase git ref component. Beyond the
+ * charset, `git check-ref-format` forbids ".." anywhere and a ".lock" suffix
+ * in a component. The "/" separating prefix from slug is added at
+ * name-assembly time, never stored. This pattern is the single validator —
+ * settings UIs import it rather than repeating the rules.
  */
+export const BRANCH_NAMING_PREFIX_PATTERN =
+  /^(?!.*\.\.)(?!.*\.lock$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
+
 export const BranchNamingPrefix = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(32),
-  Schema.isPattern(/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/),
+  Schema.isPattern(BRANCH_NAMING_PREFIX_PATTERN),
 );
 export type BranchNamingPrefix = typeof BranchNamingPrefix.Type;
 

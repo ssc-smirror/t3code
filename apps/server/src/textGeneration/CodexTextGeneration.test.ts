@@ -419,8 +419,10 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
 
+          // Raw passthrough: normalization/validation happens centrally in
+          // buildGeneratedWorktreeBranchName, not per adapter.
           expect(generated.branch).toBe("handle-empty-cart");
-          expect(generated.prefix).toBe("bugfix");
+          expect(generated.prefix).toBe(" Bugfix ");
         }),
     ),
   );

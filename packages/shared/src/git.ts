@@ -170,7 +170,12 @@ export function buildGeneratedWorktreeBranchName(
   }
 
   const safeSlug = sanitizeBranchFragment(slug);
-  return prefix === null ? safeSlug : `${prefix}/${safeSlug}`;
+  if (prefix === null) {
+    // "No prefix" means no namespace at all: the sanitizer preserves "/",
+    // so a model slug like "feature/fix-login" must still flatten here.
+    return safeSlug.replace(/\//g, "-").replace(/-+/g, "-");
+  }
+  return `${prefix}/${safeSlug}`;
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   EventId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
+  GitManagerError,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
@@ -2000,6 +2001,34 @@ const makeWsRpcLayer = (
                 newBranch: input.newRefName,
               })
               .pipe(
+                // The thread metadata update rides the same server operation
+                // so a client disconnect cannot leave git renamed while the
+                // durable thread still points at the old branch.
+                Effect.tap(({ branch }) => {
+                  const threadId = input.threadId;
+                  return threadId === undefined
+                    ? Effect.void
+                    : Effect.gen(function* () {
+                        yield* orchestrationEngine.dispatch({
+                          type: "thread.meta.update",
+                          commandId: yield* serverCommandId("vcs-rename-thread-meta-update"),
+                          threadId,
+                          branch,
+                          expectedBranch: input.refName,
+                        });
+                      }).pipe(
+                        Effect.mapError(
+                          (cause) =>
+                            new GitManagerError({
+                              operation: "vcs.renameRef:updateThreadMetadata",
+                              cwd: input.cwd,
+                              detail:
+                                "Branch was renamed, but updating the thread metadata failed.",
+                              cause,
+                            }),
+                        ),
+                      );
+                }),
                 Effect.map(({ branch }) => ({ refName: branch })),
                 Effect.tap(() => refreshGitStatus(input.cwd)),
               ),
