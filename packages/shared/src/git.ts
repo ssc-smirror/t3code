@@ -1,4 +1,5 @@
 import type {
+  BranchNamingConfig,
   VcsRef,
   SourceControlProviderInfo,
   VcsStatusLocalResult,
@@ -106,6 +107,50 @@ export function buildTemporaryWorktreeBranchName(
 
 export function isTemporaryWorktreeBranch(refName: string): boolean {
   return TEMP_WORKTREE_BRANCH_PATTERN.test(refName.trim().toLowerCase());
+}
+
+function stripLeadingSegment(value: string, segment: string): string {
+  return value.startsWith(`${segment}/`) ? value.slice(segment.length + 1) : value;
+}
+
+/**
+ * Assemble the final generated worktree branch name from the model output
+ * and the resolved branch-naming config. Model output is advisory: everything
+ * is sanitized and an empty slug becomes "update".
+ */
+export function buildGeneratedWorktreeBranchName(
+  generatedBranch: string,
+  naming: BranchNamingConfig,
+): string {
+  // Models occasionally echo a full ref or fold the prefix into the slug;
+  // strip both before sanitizing so prefixes never double up.
+  let slug = generatedBranch
+    .trim()
+    .toLowerCase()
+    .replace(/^refs\/heads\//, "")
+    .replace(/['"`]/g, "");
+  slug = stripLeadingSegment(slug, WORKTREE_BRANCH_PREFIX);
+
+  let prefix: string | null;
+  switch (naming.mode) {
+    case "prefix": {
+      prefix = naming.prefix ?? WORKTREE_BRANCH_PREFIX;
+      slug = stripLeadingSegment(slug, prefix);
+      break;
+    }
+    case "none": {
+      prefix = null;
+      break;
+    }
+  }
+
+  const safeSlug = sanitizeBranchFragment(slug);
+  if (prefix === null) {
+    // "No prefix" means no namespace at all: the sanitizer preserves "/",
+    // so a model slug like "feature/fix-login" must still flatten here.
+    return safeSlug.replace(/\//g, "-").replace(/-+/g, "-");
+  }
+  return `${prefix}/${safeSlug}`;
 }
 
 /**

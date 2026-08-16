@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyGitStatusStreamEvent,
+  buildGeneratedWorktreeBranchName,
   buildTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
@@ -107,6 +108,59 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/feature/demo`)).toBe(false);
     expect(isTemporaryWorktreeBranch("main")).toBe(false);
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/deadbeef-extra`)).toBe(false);
+  });
+});
+
+describe("buildGeneratedWorktreeBranchName", () => {
+  it("prefixes with the default worktree prefix in prefix mode", () => {
+    expect(buildGeneratedWorktreeBranchName("Fix Login Crash", { mode: "prefix" })).toBe(
+      "t3code/fix-login-crash",
+    );
+  });
+
+  it("uses a custom prefix and strips a duplicated prefix from the slug", () => {
+    expect(
+      buildGeneratedWorktreeBranchName("acme/fix-login-crash", { mode: "prefix", prefix: "acme" }),
+    ).toBe("acme/fix-login-crash");
+    expect(
+      buildGeneratedWorktreeBranchName("t3code/fix-login-crash", {
+        mode: "prefix",
+        prefix: "acme",
+      }),
+    ).toBe("acme/fix-login-crash");
+  });
+
+  it("strips refs/heads/ and quotes before assembling", () => {
+    expect(buildGeneratedWorktreeBranchName('refs/heads/"fix-thing"', { mode: "prefix" })).toBe(
+      "t3code/fix-thing",
+    );
+  });
+
+  it("produces a bare slug in none mode", () => {
+    expect(buildGeneratedWorktreeBranchName("Fix Login Crash", { mode: "none" })).toBe(
+      "fix-login-crash",
+    );
+    expect(buildGeneratedWorktreeBranchName("t3code/fix-login-crash", { mode: "none" })).toBe(
+      "fix-login-crash",
+    );
+  });
+
+  it("flattens namespaced model output in none mode", () => {
+    expect(buildGeneratedWorktreeBranchName("feature/fix-login", { mode: "none" })).toBe(
+      "feature-fix-login",
+    );
+    expect(buildGeneratedWorktreeBranchName("team/nested/slug", { mode: "none" })).toBe(
+      "team-nested-slug",
+    );
+  });
+
+  it("falls back to update for empty slugs", () => {
+    expect(buildGeneratedWorktreeBranchName("  ", { mode: "prefix" })).toBe("t3code/update");
+  });
+
+  it("truncates overlong slugs to 64 characters", () => {
+    const generated = buildGeneratedWorktreeBranchName("x".repeat(200), { mode: "prefix" });
+    expect(generated).toBe(`t3code/${"x".repeat(64)}`);
   });
 });
 

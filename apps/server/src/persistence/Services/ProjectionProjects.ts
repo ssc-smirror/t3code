@@ -7,6 +7,7 @@
  * @module ProjectionProjectRepository
  */
 import {
+  BranchNamingConfig,
   IsoDateTime,
   ModelSelection,
   ProjectId,
@@ -26,6 +27,8 @@ export const ProjectionProject = Schema.Struct({
   workspaceRoot: Schema.String,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   defaultThreadEnvMode: Schema.NullOr(ThreadEnvMode),
+  branchNaming: Schema.optional(Schema.NullOr(BranchNamingConfig)),
+  autoGenerateBranchName: Schema.optional(Schema.NullOr(Schema.Boolean)),
   faviconPath: Schema.optional(Schema.NullOr(Schema.String)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,

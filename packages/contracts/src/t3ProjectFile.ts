@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
+import { BranchNamingConfig } from "./branchNaming.ts";
 import { ThreadEnvMode } from "./environment.ts";
 import { ProjectScriptIcon } from "./orchestration.ts";
 
@@ -78,6 +79,12 @@ export const T3ProjectFile = Schema.Struct({
     ThreadEnvMode.annotate({
       description:
         'Where new threads start for this repository: "worktree" for a fresh git worktree, "local" for the current checkout. A per-project setting in T3 Code overrides this; when neither is set, the global default applies.',
+    }),
+  ),
+  branchNaming: Schema.optionalKey(
+    BranchNamingConfig.annotate({
+      description:
+        'How T3 Code names generated worktree branches for this repository: {"mode": "prefix", "prefix": "..."} for a fixed prefix (defaults to "t3code" when prefix is omitted), or {"mode": "none"} for no prefix. A per-project setting in T3 Code overrides this; when neither is set, the global default applies.',
     }),
   ),
   scripts: Schema.optionalKey(

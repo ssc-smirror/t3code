@@ -13,6 +13,7 @@ import {
   selectProjectGroupingSettings,
 } from "../../logicalProject";
 import type {
+  BranchNamingConfig,
   ContextMenuItem,
   ModelSelection,
   ProviderDriverKind,
@@ -39,6 +40,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { isElectron } from "../../env";
 import {
   useClientSettings,
+  useEnvironmentSettings,
   useUpdateClientSettings,
   usePrimarySettings,
 } from "../../hooks/useSettings";
@@ -66,7 +68,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { primaryServerProvidersAtom, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -110,6 +112,11 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { ProjectFaviconPickerDialog } from "./ProjectFaviconPickerDialog";
+import {
+  branchNamingDescription,
+  branchNamingLabel,
+  BranchNamingSettingsControl,
+} from "./BranchNamingSettingsControl";
 
 export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
@@ -308,6 +315,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const updateClientSettings = useUpdateClientSettings();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const serverConfigs = useServerConfigs();
   const threads = useThreadShells();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
@@ -337,6 +345,11 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       (member) => member.environmentId === group.environmentId && member.id === group.id,
     ) ?? group.memberProjects[0]!;
   const faviconPath = representative.faviconPath ?? null;
+  const [selectedCheckoutKey, setSelectedCheckoutKey] = useState(representative.physicalProjectKey);
+  const selectedCheckout =
+    group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
+    representative;
+  const selectedEnvironmentSettings = useEnvironmentSettings(selectedCheckout.environmentId);
 
   const threadCountByMember = useMemo(() => {
     const counts = new Map<string, number>();
@@ -366,6 +379,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
         title: string;
         defaultModelSelection: ModelSelection | null;
         defaultThreadEnvMode: ThreadEnvMode | null;
+        branchNaming: BranchNamingConfig | null;
+        autoGenerateBranchName: boolean | null;
         faviconPath: string | null;
       }>,
       failureTitle: string,
@@ -443,6 +458,30 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     [updateAllMembers],
   );
 
+  // ----- branch naming -----
+  // Old servers silently drop the new fields; hide the controls instead of
+  // offering successful-looking no-ops. Writes fan out to every member, so
+  // every member's environment must understand them.
+  const supportsBranchNaming = group.memberProjects.every(
+    (member) =>
+      serverConfigs.get(member.environmentId)?.environment.capabilities
+        .branchNamingConfiguration === true,
+  );
+  const storedBranchNaming = representative.branchNaming ?? null;
+  const storedAutoGenerateBranchName = representative.autoGenerateBranchName ?? null;
+  const setBranchNaming = useCallback(
+    (config: BranchNamingConfig | null) =>
+      void updateAllMembers({ branchNaming: config }, "Failed to update branch naming"),
+    [updateAllMembers],
+  );
+  const setAutoGenerateBranchName = useCallback(
+    (value: boolean | null) =>
+      void updateAllMembers(
+        { autoGenerateBranchName: value },
+        "Failed to update branch auto-naming",
+      ),
+    [updateAllMembers],
+  );
   // ----- favicon -----
   const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
@@ -463,10 +502,6 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
 
   // ----- checkout selection and scripts -----
-  const [selectedCheckoutKey, setSelectedCheckoutKey] = useState(representative.physicalProjectKey);
-  const selectedCheckout =
-    group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
-    representative;
   const selectedServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(selectedCheckout.environmentId),
   );
@@ -483,8 +518,12 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
   // What the "Default" option resolves to while no override is set: the
   // repo's t3.json value when present, otherwise the global setting.
-  const inheritedEnvMode = t3File.file?.defaultThreadEnvMode ?? settings.defaultThreadEnvMode;
+  const inheritedEnvMode =
+    t3File.file?.defaultThreadEnvMode ?? selectedEnvironmentSettings.defaultThreadEnvMode;
   const inheritedEnvModeSource = t3File.file?.defaultThreadEnvMode != null ? "t3.json" : "global";
+  const inheritedBranchNaming =
+    t3File.file?.branchNaming ?? selectedEnvironmentSettings.branchNaming;
+  const inheritedBranchNamingSource = t3File.file?.branchNaming != null ? "t3.json" : "global";
   const importableScripts = useMemo(
     () =>
       t3File.scripts.filter(
@@ -910,6 +949,84 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
               </Select>
             }
           />
+          {supportsBranchNaming ? (
+            <>
+              <SettingsRow
+                title="Branch naming"
+                description={`${branchNamingDescription(storedBranchNaming ?? inheritedBranchNaming)} Overrides t3.json and the global default.`}
+                resetAction={
+                  storedBranchNaming !== null ? (
+                    <SettingResetButton
+                      label="project branch naming"
+                      onClick={() => setBranchNaming(null)}
+                    />
+                  ) : null
+                }
+                control={
+                  <BranchNamingSettingsControl
+                    value={storedBranchNaming}
+                    inheritedLabel={
+                      group.memberProjects.length > 1
+                        ? "each checkout's t3.json or global setting"
+                        : `${inheritedBranchNamingSource}: ${branchNamingLabel(inheritedBranchNaming).toLowerCase()}`
+                    }
+                    onChange={setBranchNaming}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Auto-generate branch name"
+                description="Let the model rename a new worktree branch once it understands the task from the first message."
+                resetAction={
+                  storedAutoGenerateBranchName !== null ? (
+                    <SettingResetButton
+                      label="project branch auto-naming"
+                      onClick={() => setAutoGenerateBranchName(null)}
+                    />
+                  ) : null
+                }
+                control={
+                  <Select
+                    value={
+                      storedAutoGenerateBranchName === null
+                        ? "inherit"
+                        : storedAutoGenerateBranchName
+                          ? "on"
+                          : "off"
+                    }
+                    onValueChange={(value) => {
+                      if (value === "on" || value === "off") {
+                        setAutoGenerateBranchName(value === "on");
+                      } else if (value === "inherit") {
+                        setAutoGenerateBranchName(null);
+                      }
+                    }}
+                  >
+                    <SelectTrigger aria-label="Auto-generate branch name">
+                      <SelectValue>
+                        {storedAutoGenerateBranchName === null
+                          ? group.memberProjects.length > 1
+                            ? "Default (per checkout)"
+                            : `Default (${selectedEnvironmentSettings.autoGenerateBranchNames ? "on" : "off"})`
+                          : storedAutoGenerateBranchName
+                            ? "On"
+                            : "Off"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      <SelectItem value="inherit">
+                        {group.memberProjects.length > 1
+                          ? "Default (each checkout's global setting)"
+                          : `Default (${selectedEnvironmentSettings.autoGenerateBranchNames ? "on" : "off"})`}
+                      </SelectItem>
+                      <SelectItem value="on">On</SelectItem>
+                      <SelectItem value="off">Off</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+            </>
+          ) : null}
         </SettingsSection>
 
         <SettingsSection
