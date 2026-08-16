@@ -43,6 +43,8 @@ export type PinThreadInput = CommandInput<"thread.pin">;
 export type UnpinThreadInput = CommandInput<"thread.unpin">;
 export type ReorderPinnedThreadInput = CommandInput<"thread.pin.reorder">;
 export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
+export type RenameThreadBranchInput = CommandInput<"thread.branch.rename">;
+export type RegenerateThreadBranchInput = CommandInput<"thread.branch.regenerate">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
@@ -239,6 +241,25 @@ export const updateThreadMetadata: (input: UpdateThreadMetadataInput) => Command
     commandId: yield* commandId(input),
   });
 });
+
+export const renameThreadBranch: (input: RenameThreadBranchInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.renameThreadBranch",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.branch.rename",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const regenerateThreadBranch: (input: RegenerateThreadBranchInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.regenerateThreadBranch")(function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "thread.branch.regenerate",
+      commandId: yield* commandId(input),
+    });
+  });
 
 export const setThreadRuntimeMode: (input: SetThreadRuntimeModeInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.setThreadRuntimeMode",

@@ -132,6 +132,7 @@ export interface GitRenameBranchInput {
   cwd: string;
   oldBranch: string;
   newBranch: string;
+  onConflict?: "deduplicate" | "fail";
 }
 
 export interface GitRenameBranchResult {

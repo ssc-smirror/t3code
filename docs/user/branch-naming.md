@@ -32,5 +32,19 @@ without an override inherits the global value.
 The model used for naming follows the **Source control writer model** setting, falling back to
 the global text generation model.
 
+## Rename a thread branch
+
+For a worktree thread, use the pencil button to edit the current branch name or the sparkles
+button to generate a new name from the conversation. The same controls are available from the
+mobile branch sheet. Branch switching and rename controls stay disabled until the operation
+finishes.
+
+The server records the requested rename and its exact collision-resolved target before changing
+Git. If the connection drops or the server restarts, it resumes that target and brings the thread
+metadata back in sync with the checked-out branch.
+
+This changes the local worktree branch only. It does not rename a remote branch or move an open
+pull request to the new branch; handle those separately with your Git host when needed.
+
 Branch generation runs on the server, so worktree branches created from any client — including
 mobile — get configured prefixes and auto-naming.

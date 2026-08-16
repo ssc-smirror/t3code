@@ -189,4 +189,108 @@ describe("GitWorkflowService", () => {
       ),
     );
   });
+
+  it.effect("prepares one collision-resolved branch target without mutating Git", () => {
+    const listLocalBranchNames = vi.fn(() => Effect.succeed(["feature/demo", "feature/demo-1"]));
+    const renameBranch = vi.fn();
+    const layer = GitWorkflowService.layer.pipe(
+      Layer.provide(
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+          resolve: () =>
+            Effect.succeed({
+              kind: "git",
+              repository: {} as never,
+              driver: {} as never,
+            }),
+        }),
+      ),
+      Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({ listLocalBranchNames, renameBranch })),
+      Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    );
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const result = yield* workflow.prepareBranchRename({
+        cwd: "/repo",
+        desiredBranch: "feature/demo",
+      });
+
+      expect(result).toEqual({ branch: "feature/demo-2" });
+      expect(renameBranch).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("treats an already-applied prepared rename as success", () => {
+    const renameBranch = vi.fn();
+    const layer = GitWorkflowService.layer.pipe(
+      Layer.provide(
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+          resolve: () =>
+            Effect.succeed({
+              kind: "git",
+              repository: {} as never,
+              driver: {} as never,
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(GitVcsDriver.GitVcsDriver)({
+          status: () => Effect.succeed({ refName: "feature/demo" } as never),
+          renameBranch,
+        }),
+      ),
+      Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    );
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const result = yield* workflow.applyPreparedBranchRename({
+        cwd: "/repo",
+        previousBranch: "t3code/12345678",
+        targetBranch: "feature/demo",
+      });
+
+      expect(result).toEqual({ branch: "feature/demo" });
+      expect(renameBranch).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("applies the exact persisted target without resolving collisions again", () => {
+    const renameBranch = vi.fn(() => Effect.succeed({ branch: "feature/demo" }));
+    const layer = GitWorkflowService.layer.pipe(
+      Layer.provide(
+        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+          resolve: () =>
+            Effect.succeed({
+              kind: "git",
+              repository: {} as never,
+              driver: {} as never,
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(GitVcsDriver.GitVcsDriver)({
+          status: () => Effect.succeed({ refName: "t3code/12345678" } as never),
+          renameBranch,
+        }),
+      ),
+      Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    );
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      yield* workflow.applyPreparedBranchRename({
+        cwd: "/repo",
+        previousBranch: "t3code/12345678",
+        targetBranch: "feature/demo",
+      });
+
+      expect(renameBranch).toHaveBeenCalledWith({
+        cwd: "/repo",
+        oldBranch: "t3code/12345678",
+        newBranch: "feature/demo",
+        onConflict: "fail",
+      });
+    }).pipe(Effect.provide(layer));
+  });
 });

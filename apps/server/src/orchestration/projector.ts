@@ -313,6 +313,7 @@ export function projectEvent(
             settledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            branchRename: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -463,6 +464,7 @@ export function projectEvent(
               ? { modelSelection: payload.modelSelection }
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
+            ...(payload.branchRename !== undefined ? { branchRename: payload.branchRename } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
             updatedAt: payload.updatedAt,
           }),

@@ -5,7 +5,14 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  GitBranchIcon,
+  PencilIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  SparklesIcon,
+} from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -26,7 +33,7 @@ import { readLocalApi } from "../localApi";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { shouldLoadNextBranchPageAfterScroll } from "../state/paginatedBranches";
 import { usePaginatedBranches } from "../state/queries";
-import { useProject, useThread } from "../state/entities";
+import { useProject, useServerConfigs, useThread } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -105,6 +112,11 @@ export function BranchToolbarBranchSelector({
     threadEnvironment.updateMetadata,
     "thread metadata update",
   );
+  const renameThreadBranch = useAtomCommand(threadEnvironment.renameBranch, "branch rename");
+  const regenerateThreadBranch = useAtomCommand(
+    threadEnvironment.regenerateBranch,
+    "branch name generation",
+  );
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, {
     reportFailure: false,
   });
@@ -122,6 +134,7 @@ export function BranchToolbarBranchSelector({
     draftId ? store.getDraftSession(draftId) : store.getDraftThreadByRef(threadRef),
   );
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
+  const serverConfigs = useServerConfigs();
   const serverSession = serverThread?.session ?? null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
 
@@ -330,6 +343,8 @@ export function BranchToolbarBranchSelector({
         ? queriedActiveBranch.isRemote === true
         : null;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
+  const isBranchRenamePending = serverThread?.branchRename != null;
+  const isAnyBranchActionPending = isBranchActionPending || isBranchRenamePending;
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
     ? "Loading refs..."
@@ -364,6 +379,86 @@ export function BranchToolbarBranchSelector({
     );
   }, []);
 
+  const supportsThreadBranchRenaming =
+    serverConfigs.get(environmentId)?.environment.capabilities.threadBranchRenaming === true;
+  const canRenameThreadBranch =
+    supportsThreadBranchRenaming &&
+    hasServerThread &&
+    activeThreadId !== undefined &&
+    activeThreadBranch !== null &&
+    activeWorktreePath !== null &&
+    resolvedActiveBranch === activeThreadBranch &&
+    resolvedActiveBranchIsRemote !== true &&
+    !isSelectingWorktreeBase;
+  const [renameDraftBranch, setRenameDraftBranch] = useState<string | null>(null);
+  const renameCommittedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isBranchRenamePending) return;
+    renameCommittedRef.current = true;
+    setRenameDraftBranch(null);
+    setIsBranchMenuOpen(false);
+  }, [isBranchRenamePending]);
+
+  const startBranchRename = useCallback(() => {
+    if (!canRenameThreadBranch || isBranchRenamePending || activeThreadBranch === null) return;
+    renameCommittedRef.current = false;
+    setIsBranchMenuOpen(false);
+    setRenameDraftBranch(activeThreadBranch);
+  }, [activeThreadBranch, canRenameThreadBranch, isBranchRenamePending]);
+
+  const commitBranchRename = useCallback(
+    (rawBranch: string) => {
+      const previousBranch = renameDraftBranch;
+      setRenameDraftBranch(null);
+      const branch = rawBranch.trim();
+      if (
+        !canRenameThreadBranch ||
+        isBranchRenamePending ||
+        activeThreadId === undefined ||
+        previousBranch === null ||
+        branch.length === 0 ||
+        branch === previousBranch
+      ) {
+        return;
+      }
+      void renameThreadBranch({
+        environmentId,
+        input: { threadId: activeThreadId, branch, expectedBranch: previousBranch },
+      });
+    },
+    [
+      activeThreadId,
+      canRenameThreadBranch,
+      environmentId,
+      isBranchRenamePending,
+      renameDraftBranch,
+      renameThreadBranch,
+    ],
+  );
+
+  const regenerateBranchName = useCallback(() => {
+    if (
+      !canRenameThreadBranch ||
+      isBranchRenamePending ||
+      activeThreadId === undefined ||
+      activeThreadBranch === null
+    ) {
+      return;
+    }
+    void regenerateThreadBranch({
+      environmentId,
+      input: { threadId: activeThreadId, expectedBranch: activeThreadBranch },
+    });
+  }, [
+    activeThreadBranch,
+    activeThreadId,
+    canRenameThreadBranch,
+    environmentId,
+    isBranchRenamePending,
+    regenerateThreadBranch,
+  ]);
+
   const handleBranchContextMenu = useCallback(
     (event: ReactMouseEvent, branchName: string | null) => {
       if (!branchName) return;
@@ -371,14 +466,32 @@ export function BranchToolbarBranchSelector({
       if (!api) return;
       event.preventDefault();
       event.stopPropagation();
-      const items: ContextMenuItem<"copy-branch-name">[] = [
+      const canRenameThisBranch = canRenameThreadBranch && branchName === activeThreadBranch;
+      const items: ContextMenuItem<"copy-branch-name" | "rename-branch">[] = [
         { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
+        ...(canRenameThisBranch
+          ? [
+              {
+                id: "rename-branch",
+                label: "Rename branch…",
+                icon: "pencil",
+                disabled: isBranchRenamePending,
+              } as const,
+            ]
+          : []),
       ];
       void api.contextMenu.show(items, { x: event.clientX, y: event.clientY }).then((action) => {
         if (action === "copy-branch-name") copyBranchName(branchName);
+        if (action === "rename-branch") startBranchRename();
       });
     },
-    [copyBranchName],
+    [
+      activeThreadBranch,
+      canRenameThreadBranch,
+      copyBranchName,
+      isBranchRenamePending,
+      startBranchRename,
+    ],
   );
 
   const runBranchAction = (action: () => Promise<void>) => {
@@ -390,7 +503,7 @@ export function BranchToolbarBranchSelector({
   };
 
   const selectBranch = (refName: VcsRef) => {
-    if (!branchCwd || !activeProjectCwd || isBranchActionPending) return;
+    if (!branchCwd || !activeProjectCwd || isAnyBranchActionPending) return;
 
     if (isSelectingWorktreeBase) {
       setThreadBranch(refName.name, null);
@@ -452,7 +565,7 @@ export function BranchToolbarBranchSelector({
 
   const createRef = (rawName: string) => {
     const name = sanitizeNewRefName(rawName);
-    if (!branchCwd || !name || isBranchActionPending) return;
+    if (!branchCwd || !name || isAnyBranchActionPending) return;
 
     setIsBranchMenuOpen(false);
     onComposerFocusRequest?.();
@@ -750,33 +863,107 @@ export function BranchToolbarBranchSelector({
             <TooltipPopup side="top">{branchPrTooltip}</TooltipPopup>
           </Tooltip>
         ) : null}
-        {/* Context menu lives on the wrapper: the disabled Button has
-            pointer-events-none, so the trigger itself never sees right-clicks
-            while refs are loading or a branch action is pending. */}
-        <span
-          className="flex min-w-0"
-          onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
-        >
-          <ComboboxTrigger
-            render={<Button variant="ghost" size="xs" />}
-            className="min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80"
-            disabled={isInitialBranchesLoadPending || isBranchActionPending}
-          >
+        {renameDraftBranch !== null ? (
+          <span className="flex min-w-0 items-center gap-1">
             <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+            <input
+              autoFocus
+              aria-label="Branch name"
+              spellCheck={false}
+              disabled={isBranchRenamePending}
+              className="w-52 min-w-0 rounded-sm bg-transparent px-1 text-xs text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring disabled:opacity-50"
+              defaultValue={renameDraftBranch}
+              onBlur={(event) => {
+                if (renameCommittedRef.current) return;
+                renameCommittedRef.current = true;
+                commitBranchRename(event.currentTarget.value);
+              }}
+              onFocus={(event) => event.currentTarget.select()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  renameCommittedRef.current = true;
+                  commitBranchRename(event.currentTarget.value);
+                } else if (event.key === "Escape") {
+                  renameCommittedRef.current = true;
+                  setRenameDraftBranch(null);
+                }
+              }}
+            />
+          </span>
+        ) : (
+          <>
+            {/* Context menu lives on the wrapper: the disabled Button has
+                pointer-events-none, so the trigger itself never sees right-clicks
+                while refs are loading or a branch action is pending. */}
             <span
-              data-composer-label
-              className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+              className="flex min-w-0"
+              onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
             >
-              <span
-                data-composer-label-motion
-                className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
+              <ComboboxTrigger
+                render={<Button variant="ghost" size="xs" />}
+                className={cn(
+                  "min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80",
+                  isBranchRenamePending && "opacity-60",
+                )}
+                disabled={isInitialBranchesLoadPending || isAnyBranchActionPending}
               >
-                {triggerLabel}
-              </span>
+                <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+                <span
+                  data-composer-label
+                  className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+                >
+                  <span
+                    data-composer-label-motion
+                    className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
+                  >
+                    {triggerLabel}
+                  </span>
+                </span>
+                <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+              </ComboboxTrigger>
             </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-          </ComboboxTrigger>
-        </span>
+            {canRenameThreadBranch ? (
+              <>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="Rename branch"
+                        className="shrink-0 px-1 text-muted-foreground/70 hover:text-foreground/80 group-data-[compact]/composer-context:hidden"
+                        disabled={isAnyBranchActionPending}
+                        onClick={startBranchRename}
+                      />
+                    }
+                  >
+                    <PencilIcon className="size-3" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Rename branch</TooltipPopup>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        aria-label="Generate branch name"
+                        className="shrink-0 px-1 text-muted-foreground/70 hover:text-foreground/80 group-data-[compact]/composer-context:hidden"
+                        disabled={isAnyBranchActionPending}
+                        onClick={regenerateBranchName}
+                      />
+                    }
+                  >
+                    <SparklesIcon className={cn("size-3", isBranchRenamePending && "opacity-40")} />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    {isBranchRenamePending ? "Renaming branch…" : "Generate branch name"}
+                  </TooltipPopup>
+                </Tooltip>
+              </>
+            ) : null}
+          </>
+        )}
       </div>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
         <div className="shrink-0 px-3 pt-2.5">
