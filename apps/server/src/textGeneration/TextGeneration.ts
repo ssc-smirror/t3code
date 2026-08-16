@@ -51,6 +51,8 @@ export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  /** Ask the model to include a conventional task prefix in `branch`. */
+  conventional?: boolean | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
 }

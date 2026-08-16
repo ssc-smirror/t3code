@@ -360,10 +360,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         "generateBranchName",
         input.attachments,
       );
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
+      const { prompt, outputSchema } = buildBranchNamePrompt(input);
 
       const generated = yield* runCodexJson({
         operation: "generateBranchName",

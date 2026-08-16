@@ -7,9 +7,11 @@ naming off.
 
 ## Naming modes
 
-Generated names are assembled from a prefix and a short slug. Two modes control the prefix:
+Generated names are assembled from a prefix and a short slug. Three modes control the prefix:
 
 - **Custom prefix** — a fixed prefix such as `t3code` (the default) or your team's namespace.
+- **Conventional prefix** — the model chooses `feature`, `bugfix`, `hotfix`, `release`, or `chore`
+  based on the task.
 - **No prefix** — bare slugs like `fix-login-crash`, with no namespace segment.
 
 ## Where to configure it

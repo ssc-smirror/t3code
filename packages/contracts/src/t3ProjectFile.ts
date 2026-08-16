@@ -84,7 +84,7 @@ export const T3ProjectFile = Schema.Struct({
   branchNaming: Schema.optionalKey(
     BranchNamingConfig.annotate({
       description:
-        'How T3 Code names generated worktree branches for this repository: {"mode": "prefix", "prefix": "..."} for a fixed prefix (defaults to "t3code" when prefix is omitted), or {"mode": "none"} for no prefix. A per-project setting in T3 Code overrides this; when neither is set, the global default applies.',
+        'How T3 Code names generated worktree branches for this repository: {"mode": "prefix", "prefix": "..."} for a fixed prefix (defaults to "t3code" when prefix is omitted), {"mode": "conventional"} for a task-specific prefix, or {"mode": "none"} for no prefix. A per-project setting in T3 Code overrides this; when neither is set, the global default applies.',
     }),
   ),
   scripts: Schema.optionalKey(

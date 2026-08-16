@@ -11,6 +11,8 @@ export function branchNamingLabel(config: BranchNamingConfig): string {
   switch (config.mode) {
     case "prefix":
       return config.prefix ? `Prefix “${config.prefix}”` : "Default prefix";
+    case "conventional":
+      return "Conventional prefix";
     case "none":
       return "No prefix";
   }
@@ -20,6 +22,8 @@ export function branchNamingDescription(config: BranchNamingConfig): string {
   switch (config.mode) {
     case "prefix":
       return 'Generated worktree branch names use a fixed prefix (defaults to "t3code").';
+    case "conventional":
+      return "Generated worktree branch names use a task-specific conventional prefix.";
     case "none":
       return "Generated worktree branch names are bare slugs without a prefix segment.";
   }
@@ -84,6 +88,7 @@ export function BranchNamingSettingsControl({
         onValueChange={(mode) => {
           if (mode === "inherit") onChange(null);
           if (mode === "prefix") onChange({ mode: "prefix" });
+          if (mode === "conventional") onChange({ mode: "conventional" });
           if (mode === "none") onChange({ mode: "none" });
         }}
       >
@@ -95,6 +100,7 @@ export function BranchNamingSettingsControl({
             <SelectItem value="inherit">Default ({inheritedLabel})</SelectItem>
           ) : null}
           <SelectItem value="prefix">Custom prefix</SelectItem>
+          <SelectItem value="conventional">Conventional prefix</SelectItem>
           <SelectItem value="none">No prefix</SelectItem>
         </SelectPopup>
       </Select>

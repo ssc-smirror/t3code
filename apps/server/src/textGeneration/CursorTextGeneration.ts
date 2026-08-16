@@ -220,10 +220,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
 
   const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
     Effect.fn("CursorTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
+      const { prompt, outputSchema } = buildBranchNamePrompt(input);
 
       const generated = yield* runCursorJson({
         operation: "generateBranchName",
