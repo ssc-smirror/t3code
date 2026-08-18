@@ -8,8 +8,24 @@ import {
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
+  resolveAvailableBranchName,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
+
+describe("resolveAvailableBranchName", () => {
+  it("resolves collisions case-insensitively to one stable target", () => {
+    expect(
+      resolveAvailableBranchName(
+        ["feature/demo", "feature/demo-1", "FEATURE/DEMO-2"],
+        "feature/demo",
+      ),
+    ).toBe("feature/demo-3");
+  });
+
+  it("preserves an available name", () => {
+    expect(resolveAvailableBranchName(["feature/other"], "feature/demo")).toBe("feature/demo");
+  });
+});
 
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {

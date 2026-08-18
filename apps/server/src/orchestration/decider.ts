@@ -815,6 +815,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (
+        thread.branchRename != null &&
+        (command.branch !== undefined || command.worktreePath !== undefined)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already has a branch rename in progress.`,
+        });
+      }
       const branch =
         command.branch !== undefined &&
         command.expectedBranch !== undefined &&
@@ -852,6 +861,168 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(branch !== undefined ? { branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.branch.rename":
+    case "thread.branch.regenerate": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.branchRename != null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already has a branch rename in progress.`,
+        });
+      }
+      if (thread.branch === null || thread.worktreePath === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' does not have a worktree branch to rename.`,
+        });
+      }
+      if (thread.branch !== command.expectedBranch) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' moved from branch '${command.expectedBranch}' to '${thread.branch}'.`,
+        });
+      }
+      if (command.type === "thread.branch.rename" && command.branch === thread.branch) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is already on branch '${thread.branch}'.`,
+        });
+      }
+
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          branchRename:
+            command.type === "thread.branch.rename"
+              ? {
+                  status: "requested" as const,
+                  requestId: command.commandId,
+                  kind: "rename" as const,
+                  previousBranch: thread.branch,
+                  requestedBranch: command.branch,
+                  worktreePath: thread.worktreePath,
+                  startedAt: occurredAt,
+                }
+              : {
+                  status: "requested" as const,
+                  requestId: command.commandId,
+                  kind: "generate" as const,
+                  previousBranch: thread.branch,
+                  worktreePath: thread.worktreePath,
+                  startedAt: occurredAt,
+                },
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.branch.rename.prepare": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const pending = thread.branchRename;
+      const requestIsCurrent =
+        pending?.requestId === command.requestId && pending.status === "requested";
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          ...(requestIsCurrent
+            ? {
+                branchRename: {
+                  status: "prepared" as const,
+                  requestId: pending.requestId,
+                  kind: pending.kind,
+                  previousBranch: pending.previousBranch,
+                  targetBranch: command.targetBranch,
+                  worktreePath: pending.worktreePath,
+                  startedAt: pending.startedAt,
+                },
+              }
+            : {}),
+          updatedAt: requestIsCurrent ? occurredAt : thread.updatedAt,
+        },
+      };
+    }
+
+    case "thread.branch.rename.complete": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const pending = thread.branchRename;
+      const requestIsCurrent =
+        pending?.requestId === command.requestId &&
+        pending.status === "prepared" &&
+        pending.targetBranch === command.branch;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          ...(requestIsCurrent ? { branch: command.branch, branchRename: null } : {}),
+          updatedAt: requestIsCurrent ? occurredAt : thread.updatedAt,
+        },
+      };
+    }
+
+    case "thread.branch.rename.abort": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const requestIsCurrent = thread.branchRename?.requestId === command.requestId;
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          ...(requestIsCurrent
+            ? {
+                branchRename: null,
+                ...(command.observedBranch !== undefined ? { branch: command.observedBranch } : {}),
+              }
+            : {}),
+          updatedAt: requestIsCurrent ? occurredAt : thread.updatedAt,
         },
       };
     }

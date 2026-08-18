@@ -379,6 +379,42 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+const ThreadBranchRenameCommonFields = {
+  requestId: CommandId,
+  previousBranch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  startedAt: IsoDateTime,
+} as const;
+
+const ThreadBranchRenameRequested = Schema.Union([
+  Schema.Struct({
+    ...ThreadBranchRenameCommonFields,
+    status: Schema.Literal("requested"),
+    kind: Schema.Literal("rename"),
+    requestedBranch: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    ...ThreadBranchRenameCommonFields,
+    status: Schema.Literal("requested"),
+    kind: Schema.Literal("generate"),
+  }),
+]);
+
+const ThreadBranchRenamePrepared = Schema.Struct({
+  ...ThreadBranchRenameCommonFields,
+  status: Schema.Literal("prepared"),
+  kind: Schema.Literals(["rename", "generate"]),
+  targetBranch: TrimmedNonEmptyString,
+});
+
+/** Durable intent for a branch rename. A prepared target can be replayed
+    idempotently after a disconnect or server restart. */
+export const ThreadBranchRename = Schema.Union([
+  ThreadBranchRenameRequested,
+  ThreadBranchRenamePrepared,
+]);
+export type ThreadBranchRename = typeof ThreadBranchRename.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -415,6 +451,7 @@ export const OrchestrationThread = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  branchRename: Schema.optional(Schema.NullOr(ThreadBranchRename)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -475,6 +512,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  branchRename: Schema.optional(Schema.NullOr(ThreadBranchRename)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -788,6 +826,21 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   ),
 );
 
+const ThreadBranchRenameCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch.rename"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  branch: TrimmedNonEmptyString,
+  expectedBranch: TrimmedNonEmptyString,
+});
+
+const ThreadBranchRegenerateCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch.regenerate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedBranch: TrimmedNonEmptyString,
+});
+
 const ThreadRuntimeModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.runtime-mode.set"),
   commandId: CommandId,
@@ -933,6 +986,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnpinCommand,
   ThreadPinReorderCommand,
   ThreadMetaUpdateCommand,
+  ThreadBranchRenameCommand,
+  ThreadBranchRegenerateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -961,6 +1016,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnpinCommand,
   ThreadPinReorderCommand,
   ThreadMetaUpdateCommand,
+  ThreadBranchRenameCommand,
+  ThreadBranchRegenerateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -1045,6 +1102,30 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+const ThreadBranchRenamePrepareCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch.rename.prepare"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: CommandId,
+  targetBranch: TrimmedNonEmptyString,
+});
+
+const ThreadBranchRenameCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch.rename.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: CommandId,
+  branch: TrimmedNonEmptyString,
+});
+
+const ThreadBranchRenameAbortCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch.rename.abort"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: CommandId,
+  observedBranch: Schema.optional(TrimmedNonEmptyString),
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1054,6 +1135,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadBranchRenamePrepareCommand,
+  ThreadBranchRenameCompleteCommand,
+  ThreadBranchRenameAbortCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1222,6 +1306,8 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   previousTitle: Schema.optional(TrimmedNonEmptyString),
   /** Pending state shared with clients. Null clears a matching request. */
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  /** Durable branch-rename intent. Null clears the current request. */
+  branchRename: Schema.optional(Schema.NullOr(ThreadBranchRename)),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

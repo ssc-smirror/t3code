@@ -1,13 +1,16 @@
 import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
 import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
 import { cn } from "../../../lib/cn";
+import { useEnvironmentServerConfig } from "../../../state/entities";
 import { useEnvironmentQuery } from "../../../state/query";
+import { threadEnvironment } from "../../../state/threads";
+import { useAtomCommand } from "../../../state/use-atom-command";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
@@ -27,6 +30,12 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
+  const serverConfig = useEnvironmentServerConfig(selectedThread?.environmentId ?? null);
+  const renameThreadBranch = useAtomCommand(threadEnvironment.renameBranch, "branch rename");
+  const regenerateThreadBranch = useAtomCommand(
+    threadEnvironment.regenerateBranch,
+    "branch name generation",
+  );
 
   const gitStatus = useEnvironmentQuery(
     selectedThread !== null && selectedThreadCwd !== null
@@ -41,13 +50,26 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const currentWorktreePath = selectedThreadWorktreePath;
   const availableBranches = gitState.selectedThreadBranches;
   const branchesLoading = gitState.selectedThreadBranchesLoading;
-  const busy = gitState.gitOperationLabel !== null;
+  const branchRenamePending = selectedThread?.branchRename != null;
+  const busy = gitState.gitOperationLabel !== null || branchRenamePending;
+  const canRenameThreadBranch =
+    serverConfig?.environment.capabilities.threadBranchRenaming === true &&
+    selectedThread !== null &&
+    selectedThread.branch !== null &&
+    selectedThreadWorktreePath !== null &&
+    gitStatus.data?.refName === selectedThread.branch;
 
+  const [renamedBranch, setRenamedBranch] = useState(selectedThread?.branch ?? "");
   const [newBranchName, setNewBranchName] = useState("");
   const [worktreeBaseBranch, setWorktreeBaseBranch] = useState(
     currentBranchLabel === "Detached HEAD" ? "main" : currentBranchLabel,
   );
   const [worktreeBranchName, setWorktreeBranchName] = useState("");
+
+  useEffect(() => {
+    if (branchRenamePending) return;
+    setRenamedBranch(selectedThread?.branch ?? "");
+  }, [branchRenamePending, selectedThread?.branch]);
 
   const disabledExistingBranchNames: Array<string> = [];
   for (const branch of availableBranches) {
@@ -68,6 +90,59 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
         contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
         contentContainerClassName="gap-4 px-5 pt-2"
       >
+        {serverConfig?.environment.capabilities.threadBranchRenaming === true ? (
+          <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
+            <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
+              Current branch
+            </Text>
+            <TextInput
+              value={renamedBranch}
+              onChangeText={setRenamedBranch}
+              editable={!branchRenamePending}
+              placeholder="feature/mobile-polish"
+              className="rounded-[18px]"
+            />
+            <View className="flex-row gap-2">
+              <SheetActionButton
+                icon="square.and.pencil"
+                label={branchRenamePending ? "Renaming…" : "Rename"}
+                disabled={
+                  !canRenameThreadBranch ||
+                  busy ||
+                  renamedBranch.trim().length === 0 ||
+                  renamedBranch.trim() === selectedThread?.branch
+                }
+                onPress={() => {
+                  if (!canRenameThreadBranch || selectedThread === null) return;
+                  void renameThreadBranch({
+                    environmentId: selectedThread.environmentId,
+                    input: {
+                      threadId: selectedThread.id,
+                      branch: renamedBranch.trim(),
+                      expectedBranch: selectedThread.branch,
+                    },
+                  });
+                }}
+              />
+              <SheetActionButton
+                icon={{ ios: "sparkles", android: "auto_awesome" }}
+                label="Generate"
+                disabled={!canRenameThreadBranch || busy}
+                onPress={() => {
+                  if (!canRenameThreadBranch || selectedThread === null) return;
+                  void regenerateThreadBranch({
+                    environmentId: selectedThread.environmentId,
+                    input: {
+                      threadId: selectedThread.id,
+                      expectedBranch: selectedThread.branch,
+                    },
+                  });
+                }}
+              />
+            </View>
+          </View>
+        ) : null}
+
         <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
           <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
             New branch

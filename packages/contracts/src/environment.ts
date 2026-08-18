@@ -70,6 +70,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server understands branch-naming settings on projects and the server.
       Absent on older servers, so clients hide the controls. */
   branchNamingConfiguration: Schema.optionalKey(Schema.Boolean),
+  /** Server supports durable manual and generated thread branch renames. */
+  threadBranchRenaming: Schema.optionalKey(Schema.Boolean),
   /** The update path clients should offer for this server. Absent on
       servers that must be relaunched manually (dev checkouts, Windows
       foreground runs, pre-update servers). */

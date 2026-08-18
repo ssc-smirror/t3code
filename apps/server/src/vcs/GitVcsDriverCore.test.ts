@@ -1344,6 +1344,28 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(result.branch, current);
       }),
     );
+
+    it.effect("does not choose a different target for a prepared rename", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["branch", "feature/taken"]);
+        yield* git(cwd, ["checkout", "-b", "feature/original"]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const error = yield* driver
+          .renameBranch({
+            cwd,
+            oldBranch: "feature/original",
+            newBranch: "feature/taken",
+            onConflict: "fail",
+          })
+          .pipe(Effect.flip);
+
+        assert.equal(error._tag, "GitCommandError");
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/original");
+      }),
+    );
   });
 
   describe("worktree operations", () => {

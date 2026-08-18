@@ -31,6 +31,7 @@ import {
 import * as GitManager from "./GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import { resolveAvailableBranchName } from "@t3tools/shared/git";
 
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
@@ -94,6 +95,17 @@ export class GitWorkflowService extends Context.Service<
       readonly cwd: string;
       readonly oldBranch: string;
       readonly newBranch: string;
+    }) => Effect.Effect<{ readonly branch: string }, GitManagerServiceError>;
+    /** Resolve and persist this target before applying it. */
+    readonly prepareBranchRename: (input: {
+      readonly cwd: string;
+      readonly desiredBranch: string;
+    }) => Effect.Effect<{ readonly branch: string }, GitManagerServiceError>;
+    /** Apply an already-persisted target. Safe to replay after a restart. */
+    readonly applyPreparedBranchRename: (input: {
+      readonly cwd: string;
+      readonly previousBranch: string;
+      readonly targetBranch: string;
     }) => Effect.Effect<{ readonly branch: string }, GitManagerServiceError>;
   }
 >()("t3/git/GitWorkflowService") {}
@@ -330,6 +342,38 @@ export const make = Effect.gen(function* () {
     renameBranch: (input) =>
       ensureGit("GitWorkflowService.renameBranch", input.cwd).pipe(
         Effect.andThen(git.renameBranch(input)),
+      ),
+    prepareBranchRename: (input) =>
+      ensureGit("GitWorkflowService.prepareBranchRename", input.cwd).pipe(
+        Effect.andThen(git.listLocalBranchNames(input.cwd)),
+        Effect.map((existingBranches) => ({
+          branch: resolveAvailableBranchName(existingBranches, input.desiredBranch),
+        })),
+      ),
+    applyPreparedBranchRename: (input) =>
+      ensureGit("GitWorkflowService.applyPreparedBranchRename", input.cwd).pipe(
+        Effect.andThen(git.status({ cwd: input.cwd })),
+        Effect.flatMap((status) => {
+          if (status.refName === input.targetBranch) {
+            return Effect.succeed({ branch: input.targetBranch });
+          }
+          if (status.refName !== input.previousBranch) {
+            return Effect.fail(
+              new GitCommandError({
+                operation: "GitWorkflowService.applyPreparedBranchRename",
+                command: "git branch -m",
+                cwd: input.cwd,
+                detail: `Expected '${input.previousBranch}' or '${input.targetBranch}', found '${status.refName ?? "detached HEAD"}'.`,
+              }),
+            );
+          }
+          return git.renameBranch({
+            cwd: input.cwd,
+            oldBranch: input.previousBranch,
+            newBranch: input.targetBranch,
+            onConflict: "fail",
+          });
+        }),
       ),
   });
 });

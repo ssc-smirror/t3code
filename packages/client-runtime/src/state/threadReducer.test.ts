@@ -305,6 +305,55 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.modelSelection).toEqual(baseThread.modelSelection);
       }
     });
+
+    it("projects and clears durable branch rename state", () => {
+      const branchRename = {
+        status: "requested" as const,
+        requestId: CommandId.make("cmd-rename"),
+        kind: "rename" as const,
+        previousBranch: "t3code/12345678",
+        requestedBranch: "feature/demo",
+        worktreePath: "/repo/.worktrees/thread-1",
+        startedAt: "2026-04-01T05:00:00.000Z",
+      };
+      const pending = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 5,
+        occurredAt: "2026-04-01T05:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          branchRename,
+          updatedAt: "2026-04-01T05:00:00.000Z",
+        },
+      });
+
+      expect(pending.kind).toBe("updated");
+      if (pending.kind !== "updated") return;
+      expect(pending.thread.branchRename).toEqual(branchRename);
+
+      const completed = applyThreadDetailEvent(pending.thread, {
+        ...baseEventFields,
+        sequence: 6,
+        occurredAt: "2026-04-01T05:00:01.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          branch: "feature/demo",
+          branchRename: null,
+          updatedAt: "2026-04-01T05:00:01.000Z",
+        },
+      });
+
+      expect(completed.kind).toBe("updated");
+      if (completed.kind !== "updated") return;
+      expect(completed.thread.branch).toBe("feature/demo");
+      expect(completed.thread.branchRename).toBeNull();
+    });
   });
 
   describe("thread.message-sent", () => {

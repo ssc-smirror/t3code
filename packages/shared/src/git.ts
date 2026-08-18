@@ -84,6 +84,23 @@ export function resolveAutoFeatureBranchName(
   return `${resolvedBase}-${suffix}`;
 }
 
+/** Resolve a desired local branch name without colliding with existing refs. */
+export function resolveAvailableBranchName(
+  existingBranchNames: readonly string[],
+  desiredBranch: string,
+): string {
+  const existingNames = new Set(existingBranchNames.map((branch) => branch.toLowerCase()));
+  if (!existingNames.has(desiredBranch.toLowerCase())) {
+    return desiredBranch;
+  }
+
+  let suffix = 1;
+  while (existingNames.has(`${desiredBranch}-${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+  return `${desiredBranch}-${suffix}`;
+}
+
 /**
  * Strip the remote prefix from a remote ref such as `origin/feature/demo`.
  */

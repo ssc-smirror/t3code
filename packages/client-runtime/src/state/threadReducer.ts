@@ -94,6 +94,7 @@ export function applyThreadDetailEvent(
           settledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          branchRename: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],
@@ -215,6 +216,9 @@ export function applyThreadDetailEvent(
             ? { modelSelection: event.payload.modelSelection }
             : {}),
           ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
+          ...(event.payload.branchRename !== undefined
+            ? { branchRename: event.payload.branchRename }
+            : {}),
           ...(event.payload.worktreePath !== undefined
             ? { worktreePath: event.payload.worktreePath }
             : {}),
