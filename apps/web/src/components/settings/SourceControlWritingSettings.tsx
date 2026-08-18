@@ -15,11 +15,17 @@ import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
+import { useServerConfigs } from "../../state/entities";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { primaryServerProvidersAtom } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import {
+  branchNamingDescription,
+  BranchNamingSettingsControl,
+} from "./BranchNamingSettingsControl";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
@@ -43,6 +49,14 @@ const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; descr
 export function SourceControlWritingSettingsSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
+  // Old servers silently drop the branch-naming settings; hide the controls
+  // instead of offering successful-looking no-ops.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const serverConfigs = useServerConfigs();
+  const supportsBranchNaming =
+    primaryEnvironmentId !== null &&
+    serverConfigs.get(primaryEnvironmentId)?.environment.capabilities.branchNamingConfiguration ===
+      true;
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const customInstructionsRef = useRef<HTMLTextAreaElement>(null);
   const style = settings.sourceControlWritingStyle;
@@ -70,6 +84,11 @@ export function SourceControlWritingSettingsSection() {
     activeSelection.model,
   );
 
+  const branchNaming = settings.branchNaming;
+  const branchNamingDefaults = DEFAULT_UNIFIED_SETTINGS.branchNaming;
+  const storedBranchPrefix = branchNaming.mode === "prefix" ? (branchNaming.prefix ?? "") : "";
+  const isBranchNamingDirty =
+    branchNaming.mode !== branchNamingDefaults.mode || storedBranchPrefix.length > 0;
   return (
     <SettingsSection title="Text generation">
       <SettingsRow
@@ -167,6 +186,58 @@ export function SourceControlWritingSettingsSection() {
           />
         }
       />
+
+      {supportsBranchNaming ? (
+        <>
+          <SettingsRow
+            title="Branch naming"
+            description={branchNamingDescription(branchNaming)}
+            resetAction={
+              isBranchNamingDirty ? (
+                <SettingResetButton
+                  label="branch naming"
+                  onClick={() => updateSettings({ branchNaming: branchNamingDefaults })}
+                />
+              ) : null
+            }
+            control={
+              <BranchNamingSettingsControl
+                value={branchNaming}
+                onChange={(value) => {
+                  if (value !== null) updateSettings({ branchNaming: value });
+                }}
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Auto-generate branch names"
+            description="Let the model rename new worktree branches once it understands the task. Projects can override this."
+            resetAction={
+              settings.autoGenerateBranchNames !==
+              DEFAULT_UNIFIED_SETTINGS.autoGenerateBranchNames ? (
+                <SettingResetButton
+                  label="branch auto-naming"
+                  onClick={() =>
+                    updateSettings({
+                      autoGenerateBranchNames: DEFAULT_UNIFIED_SETTINGS.autoGenerateBranchNames,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.autoGenerateBranchNames}
+                onCheckedChange={(checked) =>
+                  updateSettings({ autoGenerateBranchNames: Boolean(checked) })
+                }
+                aria-label="Auto-generate branch names"
+              />
+            }
+          />
+        </>
+      ) : null}
 
       <SettingsRow
         title="Source control writer model"

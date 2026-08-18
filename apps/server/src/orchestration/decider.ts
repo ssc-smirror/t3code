@@ -291,6 +291,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.defaultThreadEnvMode !== undefined
             ? { defaultThreadEnvMode: command.defaultThreadEnvMode }
             : {}),
+          ...(command.branchNaming !== undefined ? { branchNaming: command.branchNaming } : {}),
+          ...(command.autoGenerateBranchName !== undefined
+            ? { autoGenerateBranchName: command.autoGenerateBranchName }
+            : {}),
           ...(command.faviconPath !== undefined ? { faviconPath: command.faviconPath } : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           updatedAt: occurredAt,

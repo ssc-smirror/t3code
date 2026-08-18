@@ -5,8 +5,9 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { ModelSelection, ProjectScript } from "@t3tools/contracts";
+import { BranchNamingConfig, ModelSelection, ProjectScript } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
+import { BooleanFromSqliteInt } from "../SqliteSchemas.ts";
 import {
   DeleteProjectionProjectInput,
   GetProjectionProjectInput,
@@ -18,6 +19,8 @@ import {
 const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+    branchNaming: Schema.optional(Schema.NullOr(Schema.fromJsonString(BranchNamingConfig))),
+    autoGenerateBranchName: Schema.optional(Schema.NullOr(BooleanFromSqliteInt)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
@@ -36,6 +39,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root,
           default_model_selection_json,
           default_thread_env_mode,
+          branch_naming,
+          auto_generate_branch_name,
           favicon_path,
           scripts_json,
           created_at,
@@ -48,6 +53,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.workspaceRoot},
           ${row.defaultModelSelection !== null ? JSON.stringify(row.defaultModelSelection) : null},
           ${row.defaultThreadEnvMode},
+          ${row.branchNaming != null ? JSON.stringify(row.branchNaming) : null},
+          ${row.autoGenerateBranchName == null ? null : row.autoGenerateBranchName ? 1 : 0},
           ${row.faviconPath ?? null},
           ${JSON.stringify(row.scripts)},
           ${row.createdAt},
@@ -60,6 +67,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root = excluded.workspace_root,
           default_model_selection_json = excluded.default_model_selection_json,
           default_thread_env_mode = excluded.default_thread_env_mode,
+          branch_naming = excluded.branch_naming,
+          auto_generate_branch_name = excluded.auto_generate_branch_name,
           favicon_path = excluded.favicon_path,
           scripts_json = excluded.scripts_json,
           created_at = excluded.created_at,
@@ -79,6 +88,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
+          branch_naming AS "branchNaming",
+          auto_generate_branch_name AS "autoGenerateBranchName",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
           created_at AS "createdAt",
@@ -100,6 +111,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
+          branch_naming AS "branchNaming",
+          auto_generate_branch_name AS "autoGenerateBranchName",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
           created_at AS "createdAt",

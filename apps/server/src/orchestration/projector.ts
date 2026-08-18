@@ -215,6 +215,8 @@ export function projectEvent(
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
             defaultThreadEnvMode: null,
+            branchNaming: null,
+            autoGenerateBranchName: null,
             faviconPath: payload.faviconPath ?? null,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
@@ -250,6 +252,12 @@ export function projectEvent(
                     : {}),
                   ...(payload.defaultThreadEnvMode !== undefined
                     ? { defaultThreadEnvMode: payload.defaultThreadEnvMode }
+                    : {}),
+                  ...(payload.branchNaming !== undefined
+                    ? { branchNaming: payload.branchNaming }
+                    : {}),
+                  ...(payload.autoGenerateBranchName !== undefined
+                    ? { autoGenerateBranchName: payload.autoGenerateBranchName }
                     : {}),
                   ...(payload.faviconPath !== undefined
                     ? { faviconPath: payload.faviconPath }
