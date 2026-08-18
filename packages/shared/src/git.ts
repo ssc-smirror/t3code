@@ -1,11 +1,13 @@
-import type {
-  BranchNamingConfig,
-  VcsRef,
-  SourceControlProviderInfo,
-  VcsStatusLocalResult,
-  VcsStatusRemoteResult,
-  VcsStatusResult,
-  VcsStatusStreamEvent,
+import {
+  CONVENTIONAL_BRANCH_PREFIXES,
+  DEFAULT_CONVENTIONAL_BRANCH_PREFIX,
+  type BranchNamingConfig,
+  type VcsRef,
+  type SourceControlProviderInfo,
+  type VcsStatusLocalResult,
+  type VcsStatusRemoteResult,
+  type VcsStatusResult,
+  type VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
@@ -136,6 +138,16 @@ export function buildGeneratedWorktreeBranchName(
     case "prefix": {
       prefix = naming.prefix ?? WORKTREE_BRANCH_PREFIX;
       slug = stripLeadingSegment(slug, prefix);
+      break;
+    }
+    case "conventional": {
+      const [candidate, ...rest] = slug.split("/");
+      const selectedPrefix = CONVENTIONAL_BRANCH_PREFIXES.find(
+        (allowedPrefix) => allowedPrefix === candidate,
+      );
+      prefix = selectedPrefix ?? DEFAULT_CONVENTIONAL_BRANCH_PREFIX;
+      const slugSegments = rest[0] === selectedPrefix ? rest.slice(1) : rest;
+      slug = selectedPrefix === undefined ? slug.replace(/\//g, "-") : slugSegments.join("-");
       break;
     }
     case "none": {

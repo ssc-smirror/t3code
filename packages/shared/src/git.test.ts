@@ -136,6 +136,27 @@ describe("buildGeneratedWorktreeBranchName", () => {
     );
   });
 
+  it("uses a model-selected conventional prefix", () => {
+    expect(
+      buildGeneratedWorktreeBranchName("bugfix/fix-login-crash", { mode: "conventional" }),
+    ).toBe("bugfix/fix-login-crash");
+  });
+
+  it("falls back to feature for missing or unsupported conventional prefixes", () => {
+    expect(buildGeneratedWorktreeBranchName("fix-login-crash", { mode: "conventional" })).toBe(
+      "feature/fix-login-crash",
+    );
+    expect(buildGeneratedWorktreeBranchName("docs/fix-login-crash", { mode: "conventional" })).toBe(
+      "feature/docs-fix-login-crash",
+    );
+  });
+
+  it("keeps conventional branches to a prefix and one slug segment", () => {
+    expect(
+      buildGeneratedWorktreeBranchName("chore/chore/update/deps", { mode: "conventional" }),
+    ).toBe("chore/update-deps");
+  });
+
   it("produces a bare slug in none mode", () => {
     expect(buildGeneratedWorktreeBranchName("Fix Login Crash", { mode: "none" })).toBe(
       "fix-login-crash",

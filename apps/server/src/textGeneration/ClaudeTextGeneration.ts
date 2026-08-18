@@ -320,10 +320,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
 
   const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
     Effect.fn("ClaudeTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
+      const { prompt, outputSchema } = buildBranchNamePrompt(input);
 
       const generated = yield* runClaudeJson({
         operation: "generateBranchName",

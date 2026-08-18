@@ -143,6 +143,19 @@ describe("buildBranchNamePrompt", () => {
     expect(result.prompt).toContain("image/png");
     expect(result.prompt).toContain("12345 bytes");
   });
+
+  it("asks for one allowed prefix in conventional mode without changing the response shape", () => {
+    const result = buildBranchNamePrompt({
+      message: "Fix the login timeout bug",
+      conventional: true,
+    });
+
+    expect(result.prompt).toContain("<type>/<slug>");
+    expect(result.prompt).toContain("feature, bugfix, hotfix, release, chore");
+    expect(result.prompt).toContain("Do not repeat the type inside the slug.");
+    expect(result.outputSchema.fields).toHaveProperty("branch");
+    expect(result.outputSchema.fields).not.toHaveProperty("prefix");
+  });
 });
 
 describe("buildThreadTitlePrompt", () => {

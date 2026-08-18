@@ -806,6 +806,7 @@ const make = Effect.gen(function* () {
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(naming.mode === "conventional" ? { conventional: true } : {}),
         modelSelection,
       });
       if (!generated) return;

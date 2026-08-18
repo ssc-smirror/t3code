@@ -1,5 +1,14 @@
 import * as Schema from "effect/Schema";
 
+export const CONVENTIONAL_BRANCH_PREFIXES = [
+  "feature",
+  "bugfix",
+  "hotfix",
+  "release",
+  "chore",
+] as const;
+export const DEFAULT_CONVENTIONAL_BRANCH_PREFIX = CONVENTIONAL_BRANCH_PREFIXES[0];
+
 /**
  * A custom branch prefix: exactly one lowercase git ref component. Beyond the
  * charset, `git check-ref-format` forbids ".." anywhere and a ".lock" suffix
@@ -22,6 +31,8 @@ export type BranchNamingPrefix = typeof BranchNamingPrefix.Type;
  *
  * - "prefix": `<prefix>/<slug>`, with an absent prefix meaning the built-in
  *   default ("t3code").
+ * - "conventional": the model chooses a prefix from
+ *   {@link CONVENTIONAL_BRANCH_PREFIXES}.
  * - "none": the slug alone, no prefix segment.
  *
  * Temporary branches are always minted as `t3code/<hex>` regardless of this
@@ -33,6 +44,7 @@ export const BranchNamingConfig = Schema.Union([
     mode: Schema.Literal("prefix"),
     prefix: Schema.optional(BranchNamingPrefix),
   }),
+  Schema.Struct({ mode: Schema.Literal("conventional") }),
   Schema.Struct({ mode: Schema.Literal("none") }),
 ]);
 export type BranchNamingConfig = typeof BranchNamingConfig.Type;

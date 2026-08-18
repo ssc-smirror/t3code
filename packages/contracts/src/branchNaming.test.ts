@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import { BranchNamingPrefix } from "./branchNaming.ts";
+import { BranchNamingConfig, BranchNamingPrefix } from "./branchNaming.ts";
 
 const decodePrefix = Schema.decodeUnknownExit(BranchNamingPrefix);
+const decodeConfig = Schema.decodeUnknownExit(BranchNamingConfig);
 
 describe("BranchNamingPrefix", () => {
   it("accepts valid single git ref components", () => {
@@ -25,5 +26,11 @@ describe("BranchNamingPrefix", () => {
     ]) {
       expect(decodePrefix(prefix)._tag).toBe("Failure");
     }
+  });
+});
+
+describe("BranchNamingConfig", () => {
+  it("accepts conventional mode without extra fields", () => {
+    expect(decodeConfig({ mode: "conventional" })._tag).toBe("Success");
   });
 });
